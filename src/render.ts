@@ -23,6 +23,22 @@ export function neutralizeMentions(text: string): string {
   return text.replace(/@(?=[\w.-])/g, "@\u2060");
 }
 
+/**
+ * Puts URLs from GitHub text in code spans: still readable and copyable, but kChat
+ * neither previews them nor inlines images.
+ */
+export function defuseUrls(text: string): string {
+  const code = (url: string) => `\`${url}\``;
+  return text
+    .replace(/!\[[^\]]*\]\((\S+?)\)/g, (_m, url: string) => `🖼️ ${code(url)}`)
+    .replace(/\[([^\]]+)\]\((\S+?)\)/g, (_m, label: string, url: string) => `${label} (${code(url)})`)
+    .replace(/<(https?:\/\/[^\s>]+)>/g, "$1")
+    .replace(/(?<![`\w])https?:\/\/[^\s<>`"')\]]+/g, (url) => {
+      const trailing = /[.,;:!?]+$/.exec(url)?.[0] ?? "";
+      return code(url.slice(0, url.length - trailing.length)) + trailing;
+    });
+}
+
 const TYPE_EMOJI: Record<string, string> = { bug: "🐛", feature: "✨", task: "📋" };
 const PR_STATE: Record<PrState, string> = { open: "🟢 ouverte", merged: "🟣 mergée", closed: "🔴 fermée" };
 
@@ -110,7 +126,7 @@ export class Renderer {
       const space = slice.lastIndexOf(" ");
       cut = `${(space > max * 0.6 ? slice.slice(0, space) : slice).trimEnd()}…`;
     }
-    return cut
+    return defuseUrls(cut)
       .split("\n")
       .map((l) => (l ? `> ${l}` : ">"))
       .join("\n");

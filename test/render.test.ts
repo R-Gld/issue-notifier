@@ -110,3 +110,18 @@ describe("link previews", () => {
     expect(render.prLinked(pr, "rob-dev")).toBe("🔀 PR liée : #1210 fix par **rob-dev**");
   });
 });
+
+describe("URLs in comments", () => {
+  it("wraps them in code spans so kChat does not preview them", () => {
+    expect(render.excerpt("Get it at https://example.com/downloads/latest.")).toBe(
+      "> Get it at `https://example.com/downloads/latest`.",
+    );
+    expect(render.excerpt("See [the release](https://github.com/x/releases/tag/v3.8.5) and <https://a.b/c>")).toBe(
+      "> See the release (`https://github.com/x/releases/tag/v3.8.5`) and `https://a.b/c`",
+    );
+    expect(render.excerpt("![screenshot](https://github.com/user-attachments/assets/1)")).toBe(
+      "> 🖼️ `https://github.com/user-attachments/assets/1`",
+    );
+    expect(render.excerpt("already `https://x.y` in code")).toBe("> already `https://x.y` in code");
+  });
+});
