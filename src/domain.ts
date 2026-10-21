@@ -22,6 +22,19 @@ export interface LinkedPr {
   state: PrState;
 }
 
+/** A past comment or event of an issue, replayed into a new thread. */
+export type HistoryEvent = { at: string; actor: string } & (
+  | { kind: "commented"; body: string | null; url: string }
+  | { kind: "assigned" | "unassigned"; assignee: string }
+  | { kind: "labeled" | "unlabeled"; label: string }
+  | { kind: "renamed"; from: string; to: string }
+  | { kind: "typed"; type: string | null }
+  | { kind: "milestoned"; milestone: string | null }
+  | { kind: "closed"; stateReason: string | null }
+  | { kind: "reopened" }
+  | { kind: "pr_linked"; pr: LinkedPr }
+);
+
 /** An issue that no longer lives in the repo. */
 export type Gone = "transferred" | "deleted";
 
@@ -38,6 +51,8 @@ export interface GhIssue {
   user: { login: string } | null;
   milestone?: { title: string } | null;
   pull_request?: unknown;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export function toSnapshot(issue: GhIssue): IssueSnapshot {

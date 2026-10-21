@@ -1,4 +1,4 @@
-import { toSnapshot, type GhIssue, type IssueSnapshot, type LinkedPr } from "./domain.ts";
+import { isBot, toSnapshot, type GhIssue, type HistoryEvent, type IssueSnapshot, type LinkedPr } from "./domain.ts";
 import { fetchJson, HttpError } from "./http.ts";
 
 export type IssueLookup =
@@ -12,12 +12,31 @@ export interface GitHubApi {
   listOpenIssues(): Promise<IssueSnapshot[]>;
   /** PRs of the repo that reference the issue, from its timeline. */
   linkedPrs(number: number): Promise<LinkedPr[]>;
+  /** Comments and events of the issue, oldest first, bots excluded. */
+  history(number: number): Promise<HistoryEvent[]>;
   /** Canonical issue of an issue closed as duplicate, if GitHub knows it. */
   duplicateOf(number: number): Promise<number | null>;
 }
 
+interface GhActor {
+  login: string;
+  type?: string;
+}
+
 interface GhTimelineEvent {
   event: string;
+  created_at?: string;
+  actor?: GhActor | null;
+  /** `commented` events carry the comment fields directly. */
+  user?: GhActor | null;
+  body?: string | null;
+  html_url?: string;
+  assignee?: GhActor | null;
+  label?: { name: string };
+  rename?: { from: string; to: string };
+  issue_type?: { name: string } | null;
+  milestone?: { title: string } | null;
+  state_reason?: string | null;
   source?: {
     issue?: GhIssue & {
       repository?: { full_name: string };
@@ -69,23 +88,85 @@ export class GitHub implements GitHubApi {
     }
   }
 
-  async linkedPrs(number: number): Promise<LinkedPr[]> {
-    const prs = new Map<number, LinkedPr>();
+  private async timeline(number: number): Promise<GhTimelineEvent[]> {
+    const out: GhTimelineEvent[] = [];
     for (let page = 1; ; page++) {
       const events = await this.get<GhTimelineEvent[]>(`/repos/${this.repo}/issues/${number}/timeline?per_page=100&page=${page}`);
-      for (const e of events) {
-        const src = e.source?.issue;
-        if (e.event !== "cross-referenced" || !src?.pull_request) continue;
-        if (src.repository?.full_name.toLowerCase() !== this.repo.toLowerCase()) continue;
-        prs.set(src.number, {
-          number: src.number,
-          title: src.title,
-          url: src.html_url,
-          state: src.pull_request.merged_at ? "merged" : src.state === "closed" ? "closed" : "open",
-        });
-      }
-      if (events.length < 100) return [...prs.values()];
+      out.push(...events);
+      if (events.length < 100) return out;
     }
+  }
+
+  /** A PR of this repo referencing the issue, if the event is one. */
+  private linkedPr(e: GhTimelineEvent): LinkedPr | null {
+    const src = e.source?.issue;
+    if (e.event !== "cross-referenced" || !src?.pull_request) return null;
+    if (src.repository?.full_name.toLowerCase() !== this.repo.toLowerCase()) return null;
+    return {
+      number: src.number,
+      title: src.title,
+      url: src.html_url,
+      state: src.pull_request.merged_at ? "merged" : src.state === "closed" ? "closed" : "open",
+    };
+  }
+
+  async linkedPrs(number: number): Promise<LinkedPr[]> {
+    const prs = new Map<number, LinkedPr>();
+    for (const e of await this.timeline(number)) {
+      const pr = this.linkedPr(e);
+      if (pr) prs.set(pr.number, pr);
+    }
+    return [...prs.values()];
+  }
+
+  async history(number: number): Promise<HistoryEvent[]> {
+    const out: HistoryEvent[] = [];
+    for (const e of await this.timeline(number)) {
+      const who = e.event === "commented" ? e.user : e.actor;
+      if (!e.created_at || !who || isBot(who)) continue;
+      const base = { at: e.created_at, actor: who.login };
+      switch (e.event) {
+        case "commented":
+          out.push({ ...base, kind: "commented", body: e.body ?? null, url: e.html_url ?? "" });
+          break;
+        case "assigned":
+        case "unassigned":
+          if (e.assignee) out.push({ ...base, kind: e.event, assignee: e.assignee.login });
+          break;
+        case "labeled":
+        case "unlabeled":
+          if (e.label) out.push({ ...base, kind: e.event, label: e.label.name });
+          break;
+        case "renamed":
+          if (e.rename) out.push({ ...base, kind: "renamed", from: e.rename.from, to: e.rename.to });
+          break;
+        case "issue_type_added":
+        case "issue_type_changed":
+          out.push({ ...base, kind: "typed", type: e.issue_type?.name ?? null });
+          break;
+        case "issue_type_removed":
+          out.push({ ...base, kind: "typed", type: null });
+          break;
+        case "milestoned":
+          out.push({ ...base, kind: "milestoned", milestone: e.milestone?.title ?? null });
+          break;
+        case "demilestoned":
+          out.push({ ...base, kind: "milestoned", milestone: null });
+          break;
+        case "closed":
+          out.push({ ...base, kind: "closed", stateReason: e.state_reason ?? null });
+          break;
+        case "reopened":
+          out.push({ ...base, kind: "reopened" });
+          break;
+        case "cross-referenced": {
+          const pr = this.linkedPr(e);
+          if (pr) out.push({ ...base, kind: "pr_linked", pr });
+          break;
+        }
+      }
+    }
+    return out.sort((a, b) => a.at.localeCompare(b.at));
   }
 
   async duplicateOf(number: number): Promise<number | null> {

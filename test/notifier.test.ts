@@ -18,7 +18,7 @@ function setup(config = testConfig()) {
   chat = new FakeChat();
   github = new FakeGitHub().addIssue(toSnapshot(issue1201)).addIssue(toSnapshot({ ...issue1202, state: "open", state_reason: null }));
   store = new Store(":memory:");
-  notifier = new Notifier(config, store, chat, github);
+  notifier = new Notifier(config, store, chat, github, 0);
 }
 
 const issues = (action: string, issue: GhIssue, extra: Record<string, unknown> = {}) =>
@@ -173,5 +173,56 @@ describe("reconcile", () => {
     expect(r1201!.message).toContain("🗑️ Supprimée");
     expect(r1202!.message).toContain("✅ Fermée (completed)");
     expect(chat.posts.filter((p) => p.rootId)).toEqual([]);
+  });
+});
+
+describe("history replay", () => {
+  const history = [
+    { at: "2026-10-17T06:50:00Z", actor: "rob-dev", kind: "assigned" as const, assignee: "alice-dev" },
+    { at: "2026-10-17T07:00:00Z", actor: "outside-user", kind: "commented" as const, body: "Here are my logs", url: "u1" },
+    { at: "2026-10-18T09:15:00Z", actor: "alice-dev", kind: "commented" as const, body: "Thanks, looking", url: "u2" },
+  ];
+
+  it("replays past events in order with their date and without mentions", async () => {
+    github.histories.set(1201, history);
+    await notifier.reconcile();
+    const root = chat.roots().find((p) => p.message.includes("#1201"))!;
+    const replies = chat.replies(root.id);
+    expect(replies).toHaveLength(3);
+    expect(replies[0]).toMatch(/^🕰️ _17\.10\.2026,? 08:50_\n👤 Assignée à \*\*\[alice-dev\]/);
+    expect(replies[1]).toContain("Here are my logs");
+    expect(replies.join("\n")).not.toContain("@");
+
+    await notifier.reconcile();
+    expect(chat.replies(root.id)).toHaveLength(3);
+  });
+
+  it("resumes where it stopped after a failure", async () => {
+    github.histories.set(1201, history);
+    chat.failAt = 2; // root, one history post, then a failure
+    await notifier.reconcile();
+    const root = chat.roots().find((p) => p.message.includes("#1201"))!;
+    expect(chat.replies(root.id)).toHaveLength(1);
+
+    await notifier.reconcile();
+    expect(chat.replies(root.id).map((m) => m.split("\n")[1])).toEqual([
+      expect.stringContaining("Assignée"),
+      expect.stringContaining("outside-user"),
+      expect.stringContaining("alice-dev"),
+    ]);
+  });
+
+  it("only replays what precedes the event that created the thread", async () => {
+    github.histories.set(1201, [...history, { at: "2026-10-20T10:00:00Z", actor: "outside-user", kind: "commented", body: "Any news?", url: "u3" }]);
+    await notifier.handleEvent("issue_comment", {
+      action: "created",
+      issue: issue1201,
+      comment: { body: "Any news?", html_url: "u3", user: user("outside-user"), created_at: "2026-10-20T10:00:00Z" },
+      sender: user("outside-user"),
+      repository,
+    });
+    const replies = chat.replies(chat.roots()[0]!.id);
+    expect(replies).toHaveLength(4);
+    expect(replies.filter((m) => m.includes("Any news?"))).toEqual([expect.stringContaining("cc @alice.dev")]);
   });
 });

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { buildConfig, type Config } from "../src/config.ts";
-import type { GhIssue, IssueSnapshot, LinkedPr } from "../src/domain.ts";
+import type { GhIssue, HistoryEvent, IssueSnapshot, LinkedPr } from "../src/domain.ts";
 import type { GitHubApi, IssueLookup } from "../src/github.ts";
 import { PostMissingError, type Chat } from "../src/kchat.ts";
 
@@ -34,9 +34,13 @@ interface Post {
 export class FakeChat implements Chat {
   posts: Post[] = [];
   deleted = new Set<string>();
+  /** When set, the createPost call at this 0-based index fails once. */
+  failAt: number | null = null;
   private seq = 0;
+  private calls = 0;
 
   async createPost(message: string, rootId?: string): Promise<string> {
+    if (this.calls++ === this.failAt) throw new Error("kChat unavailable");
     if (rootId && (this.deleted.has(rootId) || !this.posts.some((p) => p.id === rootId))) throw new PostMissingError(rootId);
     const id = `post${++this.seq}`;
     this.posts.push({ id, message, rootId });
@@ -62,6 +66,7 @@ export class FakeGitHub implements GitHubApi {
   issues = new Map<number, IssueLookup>();
   prs = new Map<number, LinkedPr[]>();
   duplicates = new Map<number, number>();
+  histories = new Map<number, HistoryEvent[]>();
 
   addIssue(issue: IssueSnapshot): this {
     this.issues.set(issue.number, { kind: "issue", issue });
@@ -78,6 +83,10 @@ export class FakeGitHub implements GitHubApi {
 
   async linkedPrs(number: number): Promise<LinkedPr[]> {
     return this.prs.get(number) ?? [];
+  }
+
+  async history(number: number): Promise<HistoryEvent[]> {
+    return this.histories.get(number) ?? [];
   }
 
   async duplicateOf(number: number): Promise<number | null> {

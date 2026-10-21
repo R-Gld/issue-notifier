@@ -14,10 +14,14 @@ export interface ThreadRow {
   rootMessage: string;
   /** Issue as of the last root render, used when the issue itself is gone. */
   snapshot: IssueSnapshot;
+  /** Number of history entries already replayed into the thread. */
+  historyCursor: number;
+  historyDone: boolean;
 }
 
-interface ThreadRecord extends Omit<ThreadRow, "snapshot"> {
+interface ThreadRecord extends Omit<ThreadRow, "snapshot" | "historyDone"> {
   snapshot: string;
+  historyDone: 0 | 1;
 }
 
 export class Store {
@@ -50,28 +54,41 @@ export class Store {
         received_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
     `);
+    // Threads created before history replay existed get it on the next reconcile.
+    const columns = (this.db.prepare(`PRAGMA table_info(threads)`).all() as Array<{ name: string }>).map((c) => c.name);
+    if (!columns.includes("history_cursor")) {
+      this.db.exec(`ALTER TABLE threads ADD COLUMN history_cursor INTEGER NOT NULL DEFAULT 0;
+                    ALTER TABLE threads ADD COLUMN history_done INTEGER NOT NULL DEFAULT 0;`);
+    }
   }
 
   getThread(issueNumber: number): ThreadRow | null {
     const row = this.db
       .prepare(
-        `SELECT issue_number AS issueNumber, post_id AS postId, state, duplicate_of AS duplicateOf, gone, root_message AS rootMessage, snapshot
+        `SELECT issue_number AS issueNumber, post_id AS postId, state, duplicate_of AS duplicateOf, gone, root_message AS rootMessage, snapshot,
+           history_cursor AS historyCursor, history_done AS historyDone
          FROM threads WHERE issue_number = ?`,
       )
       .get(issueNumber) as ThreadRecord | undefined;
-    return row ? { ...row, snapshot: JSON.parse(row.snapshot) as IssueSnapshot } : null;
+    return row ? { ...row, snapshot: JSON.parse(row.snapshot) as IssueSnapshot, historyDone: row.historyDone === 1 } : null;
   }
 
   saveThread(t: ThreadRow): void {
     this.db
       .prepare(
-        `INSERT INTO threads (issue_number, post_id, state, duplicate_of, gone, root_message, snapshot)
-         VALUES (@issueNumber, @postId, @state, @duplicateOf, @gone, @rootMessage, @snapshot)
+        `INSERT INTO threads (issue_number, post_id, state, duplicate_of, gone, root_message, snapshot, history_cursor, history_done)
+         VALUES (@issueNumber, @postId, @state, @duplicateOf, @gone, @rootMessage, @snapshot, @historyCursor, @historyDone)
          ON CONFLICT (issue_number) DO UPDATE SET post_id = excluded.post_id, state = excluded.state,
            duplicate_of = excluded.duplicate_of, gone = excluded.gone, root_message = excluded.root_message,
-           snapshot = excluded.snapshot`,
+           snapshot = excluded.snapshot, history_cursor = excluded.history_cursor, history_done = excluded.history_done`,
       )
-      .run({ ...t, snapshot: JSON.stringify(t.snapshot) });
+      .run({ ...t, snapshot: JSON.stringify(t.snapshot), historyDone: t.historyDone ? 1 : 0 });
+  }
+
+  setHistoryProgress(issueNumber: number, cursor: number, done: boolean): void {
+    this.db
+      .prepare(`UPDATE threads SET history_cursor = ?, history_done = ? WHERE issue_number = ?`)
+      .run(cursor, done ? 1 : 0, issueNumber);
   }
 
   /** Issues whose thread still shows them as open and present. */

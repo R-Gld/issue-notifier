@@ -1,9 +1,11 @@
-import type { Gone, IssueSnapshot, LinkedPr, PrState } from "./domain.ts";
+import type { Gone, HistoryEvent, IssueSnapshot, LinkedPr, PrState } from "./domain.ts";
 
 export interface RenderOptions {
   /** GitHub login (lowercased) → kChat username. */
   team: Map<string, string>;
   excerptLength: number;
+  /** Timezone for dates shown in replayed history. */
+  timezone?: string;
 }
 
 export interface RootState {
@@ -178,5 +180,47 @@ export class Renderer {
 
   prClosed(pr: LinkedPr, actor: string): string {
     return `🔴 PR [#${pr.number}](${pr.url}) fermée sans merge par ${this.user(actor)}`;
+  }
+
+  /**
+   * A past event replayed into a new thread, prefixed with its original date.
+   * Use a renderer without team mapping so history never mentions anyone.
+   */
+  historyEntry(e: HistoryEvent, issue: IssueSnapshot): string {
+    const date = new Intl.DateTimeFormat("fr-CH", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: this.opts.timezone ?? "Europe/Zurich",
+    }).format(new Date(e.at));
+    return `🕰️ _${date}_\n${this.historyBody(e, issue)}`;
+  }
+
+  private historyBody(e: HistoryEvent, issue: IssueSnapshot): string {
+    switch (e.kind) {
+      case "commented":
+        return this.commented(issue, e.actor, e.body, e.url);
+      case "assigned":
+        return this.assigned(e.assignee, e.actor);
+      case "unassigned":
+        return this.unassigned(e.assignee, e.actor);
+      case "labeled":
+      case "unlabeled":
+        return this.labeled(e.label, e.kind === "labeled", e.actor);
+      case "renamed":
+        return this.renamed(e.from, e.to, e.actor);
+      case "typed":
+        return this.typed(e.type, e.actor);
+      case "milestoned":
+        return this.milestoned(e.milestone, e.actor);
+      case "closed":
+        return this.closed({ ...issue, stateReason: e.stateReason }, e.actor, null);
+      case "reopened":
+        return this.reopened(issue, e.actor);
+      case "pr_linked":
+        return this.prLinked(e.pr, e.actor);
+    }
   }
 }
