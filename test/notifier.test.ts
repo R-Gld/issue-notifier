@@ -99,7 +99,7 @@ describe("issue events", () => {
 
   it("strikes the thread when the issue is transferred", async () => {
     await issues("transferred", issue1201, { changes: { new_repository: { full_name: "acme/other" } } });
-    expect(chat.roots()[0]!.message).toMatch(/~~#1201[\s\S]*➡️ Transférée/);
+    expect(chat.roots()[0]!.message).toMatch(/~~\[#1201\][\s\S]*➡️ Transférée/);
   });
 
   it("recreates the thread when its root post was deleted", async () => {

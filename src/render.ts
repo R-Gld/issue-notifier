@@ -46,7 +46,7 @@ export class Renderer {
 
   root({ issue, prs, duplicateOf, gone }: RootState): string {
     const emoji = TYPE_EMOJI[issue.type?.toLowerCase() ?? ""] ?? "📝";
-    const title = `#${issue.number} · ${neutralizeMentions(issue.title)}`;
+    const title = `[#${issue.number}](${issue.url}) · ${neutralizeMentions(issue.title)}`;
     // A rule plus a heading so each thread stands out in the channel. The blank line keeps
     // `---` from turning the previous line into a setext heading.
     const header = `---\n\n#### ${emoji} ${gone ? `~~${title}~~` : title}`;
@@ -66,7 +66,6 @@ export class Renderer {
       const list = [...prs].sort((a, b) => a.number - b.number).map((pr) => `[#${pr.number}](${pr.url}) (${PR_STATE[pr.state]})`);
       lines.push(`PRs liées : ${list.join(", ")}`);
     }
-    lines.push(`🔗 ${issue.url}`);
     return lines.join("\n");
   }
 
