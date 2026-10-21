@@ -85,3 +85,15 @@ describe("event replies", () => {
     expect(render.closed({ ...closed, stateReason: "not_planned" }, "rob-dev", null)).toMatch(/^🚫 Fermée \(not planned\) par/);
   });
 });
+
+describe("mention safety", () => {
+  it("never lets GitHub text mention kChat users", () => {
+    const msg = render.commented(open, "rob-dev", "Hi @outside-user, cc @channel @all and mail me at a@b.c", "u");
+    expect(msg).not.toMatch(/@[\w.-]/);
+    expect(msg).toContain("@⁠outside-user");
+    const root = render.root({ issue: { ...open, title: "Ping @here", labels: ["@x"] }, prs: [], duplicateOf: null, gone: null });
+    expect(root).not.toMatch(/@(here|x)/);
+    // Real mentions are still produced for mapped assignees.
+    expect(root).toContain("@alice.dev");
+  });
+});

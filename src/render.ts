@@ -15,6 +15,14 @@ export interface RootState {
   gone: Gone | null;
 }
 
+/**
+ * Breaks `@name` in text coming from GitHub so kChat never turns it into a mention
+ * (`@channel`, or a GitHub login that matches a kChat username). A word joiner keeps it readable.
+ */
+export function neutralizeMentions(text: string): string {
+  return text.replace(/@(?=[\w.-])/g, "@\u2060");
+}
+
 const TYPE_EMOJI: Record<string, string> = { bug: "🐛", feature: "✨", task: "📋" };
 const PR_STATE: Record<PrState, string> = { open: "🟢 ouverte", merged: "🟣 mergée", closed: "🔴 fermée" };
 
@@ -38,15 +46,15 @@ export class Renderer {
 
   root({ issue, prs, duplicateOf, gone }: RootState): string {
     const emoji = TYPE_EMOJI[issue.type?.toLowerCase() ?? ""] ?? "📝";
-    const title = `#${issue.number} · ${issue.title}`;
+    const title = `#${issue.number} · ${neutralizeMentions(issue.title)}`;
     // A rule plus a heading so each thread stands out in the channel. The blank line keeps
     // `---` from turning the previous line into a setext heading.
     const header = `---\n\n#### ${emoji} ${gone ? `~~${title}~~` : title}`;
 
     const status: string[] = [`Statut : ${this.status(issue, duplicateOf, gone)}`];
     if (issue.type) status.push(`Type : ${issue.type}`);
-    if (issue.labels.length) status.push(`Labels : ${issue.labels.map((l) => `\`${l}\``).join(", ")}`);
-    if (issue.milestone) status.push(`Milestone : ${issue.milestone}`);
+    if (issue.labels.length) status.push(`Labels : ${issue.labels.map((l) => `\`${neutralizeMentions(l)}\``).join(", ")}`);
+    if (issue.milestone) status.push(`Milestone : ${neutralizeMentions(issue.milestone)}`);
 
     const people = [
       `${issue.assignees.length > 1 ? "Assignees" : "Assignee"} : ${issue.assignees.map((a) => this.mention(a)).join(", ") || "—"}`,
@@ -87,7 +95,7 @@ export class Renderer {
   }
 
   excerpt(body: string | null | undefined): string {
-    const text = (body ?? "")
+    const text = neutralizeMentions(body ?? "")
       .replace(/<!--[\s\S]*?-->/g, "")
       .replace(/\r\n/g, "\n")
       .replace(/\n{3,}/g, "\n\n")
@@ -147,10 +155,11 @@ export class Renderer {
   }
 
   renamed(from: string, to: string, actor: string): string {
-    return `✏️ Titre modifié par ${this.user(actor)} : ~~${from}~~ → **${to}**`;
+    return `✏️ Titre modifié par ${this.user(actor)} : ~~${neutralizeMentions(from)}~~ → **${neutralizeMentions(to)}**`;
   }
 
   labeled(label: string, added: boolean, actor: string): string {
+    label = neutralizeMentions(label);
     return added ? `🏷️ Label \`${label}\` ajouté par ${this.user(actor)}` : `🏷️ Label \`${label}\` retiré par ${this.user(actor)}`;
   }
 
@@ -159,7 +168,7 @@ export class Renderer {
   }
 
   milestoned(milestone: string | null, actor: string): string {
-    return milestone ? `🎯 Milestone **${milestone}** par ${this.user(actor)}` : `🎯 Milestone retirée par ${this.user(actor)}`;
+    return milestone ? `🎯 Milestone **${neutralizeMentions(milestone)}** par ${this.user(actor)}` : `🎯 Milestone retirée par ${this.user(actor)}`;
   }
 
   transferred(to: string | null, actor: string): string {
@@ -171,7 +180,7 @@ export class Renderer {
   }
 
   prLinked(pr: LinkedPr, author: string): string {
-    return `🔀 PR liée : [#${pr.number} ${pr.title}](${pr.url}) par ${this.user(author)}`;
+    return `🔀 PR liée : [#${pr.number} ${neutralizeMentions(pr.title)}](${pr.url}) par ${this.user(author)}`;
   }
 
   prMerged(pr: LinkedPr, actor: string): string {
