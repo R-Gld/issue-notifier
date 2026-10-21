@@ -1,0 +1,46 @@
+# Issue notifier configuration. Secrets live in .env, not here.
+# Apply changes with: docker compose restart
+
+github:
+  repo: my-org/my-repo
+
+kchat:
+  # Base URL of the kChat / Mattermost API host, without /api/v4.
+  # On kChat this is the team's own host, which may differ from the web UI URL.
+  url: https://chat.example.com
+  # Team and channel names as they appear in the channel URL.
+  team: my-team
+  channel: github-issues
+
+# GitHub login → kChat username (without @).
+# Everyone listed here counts as the team: their comments never trigger mentions.
+team:
+  octocat: octo.cat
+  jane-doe-gh: jane.doe
+
+# Which events post a reply in the issue thread (true) or only update the root post (false).
+# The root post (status, type, labels, assignees, linked PRs) is always kept up to date.
+events:
+  assigned: true
+  unassigned: true
+  commented: true
+  pr_linked: true
+  pr_merged: true
+  pr_closed: true
+  closed: true
+  reopened: true
+  renamed: false
+  labeled: false
+  unlabeled: false
+  typed: false
+  milestoned: false
+  transferred: false
+  deleted: false
+
+comments:
+  excerptLength: 300
+
+# Recreates missing threads and refreshes root posts (also runs at startup).
+reconcile:
+  cron: "0 6 * * *"
+  timezone: Europe/Zurich

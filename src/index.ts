@@ -14,7 +14,10 @@ const github = new GitHub(config.repo, config.github.token);
 const notifier = new Notifier(config, store, kchat, github);
 
 // Fail fast on a wrong team/channel or token.
-const channelId = await kchat.resolveChannel();
+const channelId = await kchat.resolveChannel().catch((err: unknown) => {
+  log.error("cannot resolve kChat channel: check kchat.url/team/channel and KCHAT_TOKEN", { err });
+  process.exit(1);
+});
 log.info("kChat channel resolved", { team: config.kchat.team, channel: config.kchat.channel, channelId });
 
 const server = createApp({ secret: config.github.webhookSecret, repo: config.repo, notifier, store });

@@ -52,8 +52,8 @@ const fileSchema = z.object({
     channel: z.string().min(1),
   }),
   /** GitHub login → kChat username. Everyone listed here is considered part of the team. */
-  team: z.record(z.string(), z.string()).default({}),
-  events: z.partialRecord(z.enum(REPLY_EVENTS), z.boolean()).default({}),
+  team: z.record(z.string(), z.string()).nullish().transform((v) => v ?? {}),
+  events: z.partialRecord(z.enum(REPLY_EVENTS), z.boolean()).nullish().transform((v) => v ?? {}),
   comments: z.object({ excerptLength: z.number().int().positive().default(300) }).default({ excerptLength: 300 }),
   reconcile: z
     .object({

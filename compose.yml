@@ -1,0 +1,17 @@
+services:
+  issue-notifier:
+    build: .
+    image: issue-notifier
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CONFIG_PATH: /app/config.yml
+      DB_PATH: /app/data/issue-notifier.db
+    ports:
+      - "127.0.0.1:3080:3000"
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      - data:/app/data
+
+volumes:
+  data:
