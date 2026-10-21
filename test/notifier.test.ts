@@ -153,7 +153,7 @@ describe("reconcile", () => {
   it("bootstraps threads for open issues, oldest first, and is idempotent", async () => {
     github.prs.set(1202, [{ number: 1210, title: "fix", url: "u", state: "open" }]);
     await notifier.reconcile();
-    expect(chat.roots().map((p) => p.message.split("\n")[0])).toEqual([
+    expect(chat.roots().map((p) => p.message.split("\n")[2])).toEqual([
       expect.stringContaining("#1201"),
       expect.stringContaining("#1202"),
     ]);

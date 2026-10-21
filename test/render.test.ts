@@ -12,7 +12,9 @@ describe("root post", () => {
   it("renders an open issue with a mentioned assignee", () => {
     expect(render.root({ issue: open, prs: [], duplicateOf: null, gone: null })).toBe(
       [
-        "🐛 **#1201 · Crash when adding a second sync folder**",
+        "---",
+        "",
+        "#### 🐛 #1201 · Crash when adding a second sync folder",
         "Statut : 🟢 Ouverte · Type : Bug · Labels : `bug`",
         "Assignee : @alice.dev · Auteur : **[outside-user](https://github.com/outside-user)**",
         "🔗 https://github.com/acme/widgets/issues/1201",
@@ -31,8 +33,8 @@ describe("root post", () => {
     const base = { prs: [], gone: null };
     expect(render.root({ ...base, issue: { ...closed, stateReason: "not_planned" }, duplicateOf: null })).toContain("🚫 Fermée (not planned)");
     expect(render.root({ ...base, issue: { ...closed, stateReason: "duplicate" }, duplicateOf: 1150 })).toContain("🔁 Doublon de #1150");
-    expect(render.root({ ...base, issue: { ...open, assignees: [], type: null }, duplicateOf: null })).toMatch(/^📝 [\s\S]*Assignee : —/);
-    expect(render.root({ prs: [], issue: open, duplicateOf: null, gone: "transferred" })).toMatch(/^🐛 ~~#1201 ·[\s\S]*➡️ Transférée/);
+    expect(render.root({ ...base, issue: { ...open, assignees: [], type: null }, duplicateOf: null })).toMatch(/^---\n\n#### 📝 [\s\S]*Assignee : —/);
+    expect(render.root({ prs: [], issue: open, duplicateOf: null, gone: "transferred" })).toMatch(/^---\n\n#### 🐛 ~~#1201 ·[\s\S]*➡️ Transférée/);
   });
 
   it("does not mention unmapped assignees", () => {
