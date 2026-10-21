@@ -45,7 +45,10 @@ export function createApp(deps: { secret: string; repo: string; notifier: Notifi
 
     const event = String(req.headers["x-github-event"] ?? "");
     const delivery = String(req.headers["x-github-delivery"] ?? "");
-    if (event === "ping") return send(200, "pong");
+    if (event === "ping") {
+      log.info("webhook ping received", { delivery });
+      return send(200, "pong");
+    }
 
     let payload: { repository?: { full_name?: string } };
     try {
