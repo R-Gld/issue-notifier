@@ -1,0 +1,49 @@
+{
+  "url": "https://api.github.com/repos/acme/widgets/issues/1202",
+  "repository_url": "https://api.github.com/repos/acme/widgets",
+  "html_url": "https://github.com/acme/widgets/issues/1202",
+  "id": 901202,
+  "number": 1202,
+  "locked": false,
+  "milestone": null,
+  "comments": 3,
+  "closed_at": "2026-10-19T14:00:00Z",
+  "author_association": "NONE",
+  "type": {
+    "id": 1,
+    "name": "Bug"
+  },
+  "state_reason": "completed",
+  "title": "Setup wizard freezes on the folder size screen",
+  "user": {
+    "login": "another-user",
+    "id": 103,
+    "type": "User",
+    "html_url": "https://github.com/another-user"
+  },
+  "labels": [
+    {
+      "id": 1,
+      "name": "bug",
+      "color": "d73a4a"
+    }
+  ],
+  "state": "closed",
+  "assignee": {
+    "login": "rob-dev",
+    "id": 104,
+    "type": "User",
+    "html_url": "https://github.com/rob-dev"
+  },
+  "assignees": [
+    {
+      "login": "rob-dev",
+      "id": 104,
+      "type": "User",
+      "html_url": "https://github.com/rob-dev"
+    }
+  ],
+  "created_at": "2026-10-16T09:00:00Z",
+  "updated_at": "2026-10-19T14:00:00Z",
+  "body": "The setup wizard freezes when computing folder sizes."
+}

@@ -1,0 +1,14 @@
+{
+  "number": 1210,
+  "title": "fix(gui): Avoid a crash in folder trees",
+  "body": "## Summary\nComputes folder sizes off the UI thread to avoid the freeze. Fixes #1202.",
+  "html_url": "https://github.com/acme/widgets/pull/1210",
+  "state": "open",
+  "merged": false,
+  "user": {
+    "login": "rob-dev",
+    "id": 104,
+    "type": "User",
+    "html_url": "https://github.com/rob-dev"
+  }
+}

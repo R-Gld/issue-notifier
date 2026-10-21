@@ -1,0 +1,46 @@
+{
+  "url": "https://api.github.com/repos/acme/widgets/issues/1201",
+  "repository_url": "https://api.github.com/repos/acme/widgets",
+  "html_url": "https://github.com/acme/widgets/issues/1201",
+  "id": 901201,
+  "number": 1201,
+  "locked": false,
+  "milestone": null,
+  "comments": 0,
+  "closed_at": null,
+  "author_association": "NONE",
+  "type": null,
+  "state_reason": null,
+  "title": "Crash when adding a second sync folder",
+  "user": {
+    "login": "outside-user",
+    "id": 101,
+    "type": "User",
+    "html_url": "https://github.com/outside-user"
+  },
+  "labels": [
+    {
+      "id": 1,
+      "name": "bug",
+      "color": "d73a4a"
+    }
+  ],
+  "state": "open",
+  "assignee": {
+    "login": "alice-dev",
+    "id": 102,
+    "type": "User",
+    "html_url": "https://github.com/alice-dev"
+  },
+  "assignees": [
+    {
+      "login": "alice-dev",
+      "id": 102,
+      "type": "User",
+      "html_url": "https://github.com/alice-dev"
+    }
+  ],
+  "created_at": "2026-10-16T08:12:00Z",
+  "updated_at": "2026-10-16T08:12:00Z",
+  "body": "**Description**\nThe app crashes when a second sync folder is added from the settings.\n\n**Steps to reproduce**\n1. Open settings\n2. Add a folder\n\n<!-- Please attach logs -->"
+}
