@@ -146,7 +146,7 @@ export class Notifier {
   private async onIssueComment(p: IssueCommentPayload): Promise<void> {
     if (p.action !== "created" || p.issue.pull_request || isBot(p.comment.user)) return;
     const issue = toSnapshot(p.issue);
-    const message = this.render.commented(issue, p.comment.user.login, p.comment.body, p.comment.html_url);
+    const message = this.render.commented(issue, p.comment.user.login, p.comment.body);
     return this.apply(issue, { historyBefore: p.comment.created_at, reply: { event: "commented", message } });
   }
 

@@ -39,9 +39,12 @@ export class Renderer {
     return kchat ? `@${kchat}` : this.user(login);
   }
 
-  /** Never notifies anyone. */
+  /**
+   * Never notifies anyone. No profile link: kChat previews the last link of a post,
+   * so replies carry no links at all.
+   */
   user(login: string): string {
-    return `**[${login}](https://github.com/${login})**`;
+    return `**${login}**`;
   }
 
   root({ issue, prs, duplicateOf, gone }: RootState): string {
@@ -113,8 +116,8 @@ export class Renderer {
       .join("\n");
   }
 
-  commented(issue: IssueSnapshot, author: string, body: string | null | undefined, url: string): string {
-    const lines = [`💬 ${this.user(author)} a commenté :`, this.excerpt(body), `[Voir le commentaire](${url})`];
+  commented(issue: IssueSnapshot, author: string, body: string | null | undefined): string {
+    const lines = [`💬 ${this.user(author)} a commenté :`, this.excerpt(body)];
     // Only outside voices need the assignee's attention.
     if (!this.isTeam(author)) {
       const cc = this.ccAssignees(issue, author);
@@ -179,15 +182,15 @@ export class Renderer {
   }
 
   prLinked(pr: LinkedPr, author: string): string {
-    return `🔀 PR liée : [#${pr.number} ${neutralizeMentions(pr.title)}](${pr.url}) par ${this.user(author)}`;
+    return `🔀 PR liée : #${pr.number} ${neutralizeMentions(pr.title)} par ${this.user(author)}`;
   }
 
   prMerged(pr: LinkedPr, actor: string): string {
-    return `🟣 PR [#${pr.number}](${pr.url}) mergée par ${this.user(actor)}`;
+    return `🟣 PR #${pr.number} mergée par ${this.user(actor)}`;
   }
 
   prClosed(pr: LinkedPr, actor: string): string {
-    return `🔴 PR [#${pr.number}](${pr.url}) fermée sans merge par ${this.user(actor)}`;
+    return `🔴 PR #${pr.number} fermée sans merge par ${this.user(actor)}`;
   }
 
   /**
@@ -209,7 +212,7 @@ export class Renderer {
   private historyBody(e: HistoryEvent, issue: IssueSnapshot): string {
     switch (e.kind) {
       case "commented":
-        return this.commented(issue, e.actor, e.body, e.url);
+        return this.commented(issue, e.actor, e.body);
       case "assigned":
         return this.assigned(e.assignee, e.actor);
       case "unassigned":

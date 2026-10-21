@@ -16,7 +16,7 @@ describe("root post", () => {
         "",
         "#### 🐛 [#1201](https://github.com/acme/widgets/issues/1201) · Crash when adding a second sync folder",
         "Statut : 🟢 Ouverte · Type : Bug · Labels : `bug`",
-        "Assignee : @alice.dev · Auteur : **[outside-user](https://github.com/outside-user)**",
+        "Assignee : @alice.dev · Auteur : **outside-user**",
       ].join("\n"),
     );
   });
@@ -38,25 +38,24 @@ describe("root post", () => {
 
   it("does not mention unmapped assignees", () => {
     const msg = render.root({ issue: { ...open, assignees: ["unmapped-user"] }, prs: [], duplicateOf: null, gone: null });
-    expect(msg).toContain("Assignee : **[unmapped-user](https://github.com/unmapped-user)**");
+    expect(msg).toContain("Assignee : **unmapped-user**");
   });
 });
 
 describe("comments", () => {
   it("mentions assignees when an outsider comments", () => {
-    const msg = render.commented(open, "outside-user", "Still crashing on 2.1.0", "https://x/c1");
+    const msg = render.commented(open, "outside-user", "Still crashing on 2.1.0");
     expect(msg).toBe(
       [
-        "💬 **[outside-user](https://github.com/outside-user)** a commenté :",
+        "💬 **outside-user** a commenté :",
         "> Still crashing on 2.1.0",
-        "[Voir le commentaire](https://x/c1)",
         "cc @alice.dev",
       ].join("\n"),
     );
   });
 
   it("does not mention anyone when a team member comments", () => {
-    expect(render.commented({ ...open, assignees: ["alice-dev", "rob-dev"] }, "rob-dev", "On regarde", "u")).not.toContain("@");
+    expect(render.commented({ ...open, assignees: ["alice-dev", "rob-dev"] }, "rob-dev", "On regarde")).not.toContain("@");
   });
 
   it("truncates long bodies on a word boundary and quotes every line", () => {
@@ -72,7 +71,7 @@ describe("comments", () => {
 describe("event replies", () => {
   it("never mentions the actor", () => {
     expect(render.assigned("alice-dev", "rob-dev")).toBe(
-      "👤 Assignée à @alice.dev par **[rob-dev](https://github.com/rob-dev)**",
+      "👤 Assignée à @alice.dev par **rob-dev**",
     );
     expect(render.assigned("alice-dev", "alice-dev")).not.toContain("@");
     expect(render.reopened({ ...open, assignees: ["alice-dev"] }, "alice-dev")).not.toContain("cc");
@@ -87,12 +86,27 @@ describe("event replies", () => {
 
 describe("mention safety", () => {
   it("never lets GitHub text mention kChat users", () => {
-    const msg = render.commented(open, "rob-dev", "Hi @outside-user, cc @channel @all and mail me at a@b.c", "u");
+    const msg = render.commented(open, "rob-dev", "Hi @outside-user, cc @channel @all and mail me at a@b.c");
     expect(msg).not.toMatch(/@[\w.-]/);
     expect(msg).toContain("@⁠outside-user");
     const root = render.root({ issue: { ...open, title: "Ping @here", labels: ["@x"] }, prs: [], duplicateOf: null, gone: null });
     expect(root).not.toMatch(/@(here|x)/);
     // Real mentions are still produced for mapped assignees.
     expect(root).toContain("@alice.dev");
+  });
+});
+
+describe("link previews", () => {
+  it("keeps replies free of links so kChat shows no preview", () => {
+    const pr = { number: 1210, title: "fix", url: "https://github.com/x/pull/1210", state: "merged" as const };
+    const replies = [
+      render.commented(open, "outside-user", "see https://example.com"),
+      render.assigned("alice-dev", "rob-dev"),
+      render.prLinked(pr, "rob-dev"),
+      render.prMerged(pr, "rob-dev"),
+      render.closed(closed, "rob-dev", null),
+    ];
+    for (const r of replies.slice(1)) expect(r).not.toMatch(/https?:\/\//);
+    expect(render.prLinked(pr, "rob-dev")).toBe("🔀 PR liée : #1210 fix par **rob-dev**");
   });
 });

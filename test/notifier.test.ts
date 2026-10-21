@@ -127,13 +127,13 @@ describe("pull request events", () => {
     const root = chat.roots()[0]!;
     expect(root.message).toContain("#1202");
     expect(root.message).toContain("PRs liées : [#1210](https://github.com/acme/widgets/pull/1210) (🟢 ouverte)");
-    expect(chat.replies(root.id)).toEqual([expect.stringMatching(/^🔀 PR liée : \[#1210 fix\(gui\)/)]);
+    expect(chat.replies(root.id)).toEqual([expect.stringMatching(/^🔀 PR liée : #1210 fix\(gui\)/)]);
 
     // The ref may be gone from the body by merge time: the stored link still counts.
     await pullRequest("closed", { merged: true, body: "" });
     expect(root.message).toContain("(🟣 mergée)");
     expect(chat.replies(root.id)).toHaveLength(2);
-    expect(chat.replies(root.id)[1]).toMatch(/^🟣 PR \[#1210\].* mergée par/);
+    expect(chat.replies(root.id)[1]).toMatch(/^🟣 PR #1210 mergée par/);
   });
 
   it("reports a PR closed without merge", async () => {
@@ -189,7 +189,7 @@ describe("history replay", () => {
     const root = chat.roots().find((p) => p.message.includes("#1201"))!;
     const replies = chat.replies(root.id);
     expect(replies).toHaveLength(3);
-    expect(replies[0]).toMatch(/^🕰️ _17\.10\.2026,? 08:50_\n👤 Assignée à \*\*\[alice-dev\]/);
+    expect(replies[0]).toMatch(/^🕰️ _17\.10\.2026,? 08:50_\n👤 Assignée à \*\*alice-dev\*\*/);
     expect(replies[1]).toContain("Here are my logs");
     expect(replies.join("\n")).not.toContain("@");
 
