@@ -75,7 +75,7 @@ describe("store", () => {
     dirs.push(dir);
     const path = join(dir, "nested", "db.sqlite");
     const a = new Store(path);
-    const snapshot = { number: 1, title: "t", url: "u", state: "open" as const, stateReason: null, type: null, labels: [], assignees: [], author: "a", milestone: null };
+    const snapshot = { number: 1, title: "t", url: "u", state: "open" as const, stateReason: null, type: null, labels: [], assignees: [], author: "a", milestone: null, updatedAt: null };
     a.saveThread({ repo: REPO, issueNumber: 1, channelId: "c", postId: "p", state: "open", duplicateOf: null, gone: null, rootMessage: "r", snapshot, historyCursor: 0, historyDone: false });
     a.close();
     const b = new Store(path);
@@ -85,7 +85,7 @@ describe("store", () => {
 
   it("tracks thread state, history progress and open threads per repository", () => {
     const store = new Store(":memory:");
-    const snapshot = { number: 1, title: "t", url: "u", state: "open" as const, stateReason: null, type: null, labels: [], assignees: [], author: "a", milestone: null };
+    const snapshot = { number: 1, title: "t", url: "u", state: "open" as const, stateReason: null, type: null, labels: [], assignees: [], author: "a", milestone: null, updatedAt: null };
     const row = { repo: REPO, issueNumber: 1, channelId: "c", postId: "p", state: "open" as const, duplicateOf: null, gone: null, rootMessage: "r", snapshot, historyCursor: 0, historyDone: false };
     store.saveThread(row);
     store.saveThread({ ...row, issueNumber: 2, state: "closed" });

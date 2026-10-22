@@ -16,6 +16,7 @@ describe("toSnapshot", () => {
       assignees: [],
       author: "ghost",
       milestone: null,
+      updatedAt: null,
     });
   });
 

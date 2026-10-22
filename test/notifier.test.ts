@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toSnapshot, type GhIssue } from "../src/domain.ts";
-import { Notifier } from "../src/notifier.ts";
+import { MAX_PR_REFS, Notifier } from "../src/notifier.ts";
 import { Store } from "../src/store.ts";
 import { FakeChat, FakeGitHub, fixture, OTHER_REPO, REPO, testConfig, user } from "./helpers.ts";
 
@@ -583,5 +583,45 @@ describe("reconcile coverage", () => {
     await notifier.reconcile();
     expect(chat.roots()[0]!.message).toContain("🔁 Doublon de #1150");
     expect(lookups).toBe(1);
+  });
+});
+
+describe("security regressions", () => {
+  it("does not let a comment rebuild a mention, live or replayed", async () => {
+    const body = "@<!--x-->channel @<!--x-->all @<!--x-->alice-dev";
+    github.histories.set(1201, [{ at: "2026-10-17T07:00:00Z", actor: "outside-user", kind: "commented", body, url: "u" }]);
+    await notifier.handleEvent("issue_comment", {
+      action: "created",
+      issue: issue1201,
+      comment: { body, html_url: "c", user: user("outside-user"), created_at: "2026-10-20T10:00:00Z" },
+      sender: user("outside-user"),
+      repository,
+    });
+    const replies = chat.replies(chat.roots()[0]!.id);
+    expect(replies).toHaveLength(2);
+    for (const r of replies) expect(r).not.toMatch(/@(?=[\w.-])/);
+  });
+
+  it("keeps the newest issue state when deliveries arrive out of order", async () => {
+    setup(testConfig({ events: { labeled: true } }));
+    const at = (s: number) => `2026-10-22T10:00:0${s}Z`;
+    await issues("opened", { ...issue1201, labels: [], updated_at: at(0) });
+    await issues("labeled", { ...issue1201, labels: [{ name: "a" }, { name: "b" }], updated_at: at(2) }, { label: { name: "b" } });
+    await issues("labeled", { ...issue1201, labels: [{ name: "a" }], updated_at: at(1) }, { label: { name: "a" } });
+    const root = chat.roots()[0]!;
+    expect(root.message).toContain("Labels : `a`, `b`");
+    // Both events are still reported.
+    expect(chat.replies(root.id)).toHaveLength(2);
+    // A newer payload still wins.
+    await issues("unlabeled", { ...issue1201, labels: [], updated_at: at(3) }, { label: { name: "a" } });
+    expect(root.message).not.toContain("Labels");
+  });
+
+  it("follows a bounded number of issue references per PR", async () => {
+    vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    for (let n = 1; n <= 50; n++) github.addIssue(toSnapshot({ ...issue1201, number: n, html_url: `https://github.com/${REPO}/issues/${n}` }));
+    const body = Array.from({ length: 50 }, (_, i) => `#${i + 1}`).join(" ");
+    await pullRequest("opened", { body });
+    expect(chat.roots()).toHaveLength(MAX_PR_REFS);
   });
 });

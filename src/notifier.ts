@@ -57,6 +57,12 @@ interface ApplyOptions {
 }
 
 
+/**
+ * Most issue references followed per PR. Anyone can open a PR on a public repository: without a
+ * cap, a body listing `#1 … #2000` would create (and replay the history of) 2000 threads.
+ */
+export const MAX_PR_REFS = 10;
+
 export class Notifier {
   private readonly render: Renderer;
   /** Renders replayed history: no team mapping, so it never mentions anyone. */
@@ -174,7 +180,16 @@ export class Notifier {
     if (isBot(p.sender)) return;
     const pr = p.pull_request;
     const known = this.config.repos.map((r) => r.repo);
-    const refs = extractIssueRefs(`${pr.title}\n${pr.body ?? ""}`, repo.repo, known);
+    let refs = extractIssueRefs(`${pr.title}\n${pr.body ?? ""}`, repo.repo, known);
+    if (refs.length > MAX_PR_REFS) {
+      log.warn("too many issue references in PR, only the first ones are followed", {
+        repo: repo.repo,
+        pr: pr.number,
+        refs: refs.length,
+        followed: MAX_PR_REFS,
+      });
+      refs = refs.slice(0, MAX_PR_REFS);
+    }
 
     if (p.action === "closed") {
       const state = pr.merged ? "merged" : "closed";
@@ -238,6 +253,12 @@ export class Notifier {
     if (thread?.channelId && thread.channelId !== channelId) {
       log.info("channel changed, thread will be recreated", at);
       thread = null;
+    }
+    // GitHub does not guarantee delivery order: an older payload must not overwrite a newer state.
+    const known = thread?.snapshot.updatedAt;
+    if (known && issue.updatedAt && issue.updatedAt < known) {
+      log.debug("older issue payload, keeping the newer state", { ...at, payload: issue.updatedAt, known });
+      issue = thread!.snapshot;
     }
     const duplicateOf =
       issue.stateReason === "duplicate" ? (opts.duplicateOf ?? thread?.duplicateOf ?? null) : null;

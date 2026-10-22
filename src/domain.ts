@@ -11,6 +11,8 @@ export interface IssueSnapshot {
   assignees: string[];
   author: string;
   milestone: string | null;
+  /** GitHub's `updated_at`, to spot out-of-order deliveries. Null when unknown. */
+  updatedAt: string | null;
 }
 
 export type PrState = "open" | "merged" | "closed";
@@ -75,6 +77,7 @@ export function toSnapshot(issue: GhIssue): IssueSnapshot {
     assignees: (issue.assignees ?? []).map((a) => a.login),
     author: issue.user?.login ?? "ghost",
     milestone: issue.milestone?.title ?? null,
+    updatedAt: issue.updated_at ?? null,
   };
 }
 

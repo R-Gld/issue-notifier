@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { toSnapshot } from "../src/domain.ts";
-import { Renderer } from "../src/render.ts";
+import { plain, Renderer } from "../src/render.ts";
 import { fixture, OTHER_REPO, REPO } from "./helpers.ts";
 
 const render = new Renderer({ team: new Map([["rob-dev", "rob.dev"], ["alice-dev", "alice.dev"]]), excerptLength: 300 });
@@ -258,5 +258,40 @@ describe("root post details", () => {
   it("shows a closed duplicate without a known target", () => {
     expect(render.root({ repo: REPO, showRepo: false, issue: { ...closed, stateReason: "duplicate" }, prs: [], duplicateOf: null, gone: null })).toContain("🔁 Fermée (doublon)");
     expect(render.closed({ ...closed, stateReason: "duplicate" }, "rob-dev", null)).toBe("🔁 Fermée comme doublon par **rob-dev**");
+  });
+});
+
+describe("mentions can never be rebuilt from GitHub text", () => {
+  const MENTION = /@(?=[\w.-])/;
+
+  it("survives HTML comments, links and autolinks wedged after the @", () => {
+    for (const body of [
+      "@<!--x-->channel",
+      "@<!--\n-->all",
+      "@<!-- -->alice-dev",
+      "@<!--x--><!--y-->here",
+      "@<!-- unclosed",
+      "[@](https://x.example)channel",
+      "@<https://x.example>",
+      "![@](https://x.example/i.png)here",
+    ]) {
+      expect(render.excerpt(body)).not.toMatch(MENTION);
+      expect(plain(body)).not.toMatch(MENTION);
+    }
+  });
+
+  it("holds for thousands of generated payloads (property test)", () => {
+    const fragments = ["@", "<!--", "-->", "<!--x-->", "channel", "all", "alice-dev", "[", "]", "(", ")", "](https://e.x/p)",
+      "<", ">", "https://e.x/", "`", "```", "\n", "\r\n", " ", "!", ".", "-", "\\", "😀", "&#64;", "a"];
+    // Deterministic PRNG so a failure is reproducible.
+    let seed = 42;
+    const rand = (n: number) => ((seed = (seed * 1103515245 + 12345) % 2 ** 31), seed % n);
+    const short = new Renderer({ team: new Map(), excerptLength: 40 });
+    for (let i = 0; i < 5000; i++) {
+      const text = Array.from({ length: 1 + rand(12) }, () => fragments[rand(fragments.length)]).join("");
+      for (const out of [render.excerpt(text), short.excerpt(text), plain(text)]) {
+        if (MENTION.test(out)) throw new Error(`mention rebuilt from ${JSON.stringify(text)}: ${JSON.stringify(out)}`);
+      }
+    }
   });
 });

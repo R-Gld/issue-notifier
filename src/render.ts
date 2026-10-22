@@ -53,7 +53,8 @@ function defuseProse(text: string): string {
 
 /** Inline text from GitHub (titles, labels, milestones…): no mentions, no links. */
 export function plain(text: string): string {
-  return defuseUrls(neutralizeMentions(text));
+  // Neutralise last, so no later transformation can rebuild a mention.
+  return neutralizeMentions(defuseUrls(text));
 }
 
 /** A code span that survives backticks in its content. */
@@ -131,8 +132,8 @@ export class Renderer {
   }
 
   excerpt(body: string | null | undefined): string {
-    const text = neutralizeMentions(body ?? "")
-      .replace(/<!--[\s\S]*?-->/g, "")
+    const text = (body ?? "")
+      .replace(/<!--[\s\S]*?(?:-->|$)/g, "")
       .replace(/\r\n/g, "\n")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
@@ -146,7 +147,9 @@ export class Renderer {
       const space = slice.lastIndexOf(" ");
       cut = `${(space > max * 0.6 ? slice.slice(0, space) : slice).trimEnd()}…`;
     }
-    return defuseUrls(cut)
+    // Neutralise last: stripping HTML comments or links could otherwise rebuild a mention
+    // (`@<!-- -->channel`).
+    return neutralizeMentions(defuseUrls(cut))
       .split("\n")
       .map((l) => (l ? `> ${l}` : ">"))
       .join("\n");
