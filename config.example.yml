@@ -6,7 +6,8 @@ locale: en
 
 kchat:
   # Base URL of the kChat / Mattermost API host, without /api/v4.
-  # On kChat this is the team's own host, which may differ from the web UI URL.
+  # On kChat: https://<team>.kchat.infomaniak.com, with <team> taken from the kSuite channel URL
+  # https://ksuite.infomaniak.com/<id>/kchat/<team>/channels/<channel> (see the README).
   url: https://chat.example.com
   # Default team of the channels, as it appears in channel URLs.
   team: my-team

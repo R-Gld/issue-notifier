@@ -36,7 +36,7 @@ kChat is built on Mattermost and this service only uses the Mattermost API v4, s
 ## Setup
 
 1. **Chat bot**: create a bot account (Integrations → Bot accounts), add it to each channel and copy its token.
-2. **Configuration**: `cp config.example.yml config.yml`, then set `kchat.url`, the default `kchat.team`, the `repos` list and the `team` mapping (GitHub login → chat username). `config.yml` is git-ignored. See [Configuration](#configuration).
+2. **Configuration**: `cp config.example.yml config.yml`, then set `kchat.url`, the default `kchat.team`, the `repos` list and the `team` mapping (GitHub login → chat username). `config.yml` is git-ignored. See [Configuration](#configuration), and [Finding the kChat values](#finding-the-kchat-values) to read them from a kSuite URL.
 3. **Secrets**: `cp .env.example .env` (keep it `chmod 600`), then fill in:
    - `KCHAT_TOKEN`: the bot token.
    - `GITHUB_WEBHOOK_SECRET`: a random value, e.g. `openssl rand -hex 32`.
@@ -81,6 +81,26 @@ team:                               # GitHub login → chat username, for every 
   octocat: octo.cat
 events: { renamed: false }          # default reply events (see config.example.yml)
 ```
+
+### Finding the kChat values
+
+kChat is opened through the kSuite, whose URLs do not show the API host. Take the URL of the target channel in the kSuite:
+
+```
+https://ksuite.infomaniak.com/123456/kchat/my-team/channels/github-issues
+                              └─┬──┘       └──┬──┘          └─────┬─────┘
+                          kSuite id       team             channel
+```
+
+and derive:
+
+| Setting | Value | Rule |
+|---|---|---|
+| `kchat.url` | `https://my-team.kchat.infomaniak.com` | `https://<team>.kchat.infomaniak.com` |
+| `kchat.team` (or `kchatTeam`) | `my-team` | the segment after `/kchat/` |
+| `channel` | `github-issues` | the segment after `/channels/` |
+
+The kSuite id is not needed. Check the host with `curl https://my-team.kchat.infomaniak.com/api/v4/system/ping`: the answer contains `"status":"OK"`. On a plain Mattermost server, `kchat.url` is the server URL and the team and channel come from `https://<server>/<team>/channels/<channel>`.
 
 A repository posts into exactly one channel. Data written before multi-repository support belongs to the first repository of the list.
 
