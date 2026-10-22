@@ -625,3 +625,22 @@ describe("security regressions", () => {
     expect(chat.roots()).toHaveLength(MAX_PR_REFS);
   });
 });
+
+describe("languages", () => {
+  it("writes each thread in its repository's language, including PR replies across repositories", async () => {
+    setup(testConfig({ repos: [{ repo: REPO, channel: "widgets", locale: "en" }, { repo: OTHER_REPO, channel: "gadgets" }] }));
+    github.addIssue(toSnapshot({ ...issue1201, html_url: `https://github.com/${OTHER_REPO}/issues/1201` }), OTHER_REPO);
+    await notifier.handleEvent("pull_request", {
+      action: "opened",
+      pull_request: { ...pr1210, number: 5, html_url: `https://github.com/${OTHER_REPO}/pull/5`, body: `Fixes ${REPO}#1201 and #1201`, state: "open", merged: false },
+      sender: user("rob-dev"),
+      repository: { full_name: OTHER_REPO },
+    });
+    const [en] = chat.roots("acme/widgets");
+    const [fr] = chat.roots("acme/gadgets");
+    expect(en!.message).toContain("Status: 🟢 Open");
+    expect(chat.replies(en!.id)).toEqual([expect.stringMatching(/^🔀 Linked PR: gadgets#5 /)]);
+    expect(fr!.message).toContain("Statut : 🟢 Ouverte");
+    expect(chat.replies(fr!.id)).toEqual([expect.stringMatching(/^🔀 PR liée : #5 /)]);
+  });
+});

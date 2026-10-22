@@ -1,9 +1,11 @@
-import type { Gone, HistoryEvent, IssueSnapshot, LinkedPr, PrState } from "./domain.ts";
+import type { Gone, HistoryEvent, IssueSnapshot, LinkedPr } from "./domain.ts";
+import { MESSAGES, type Locale, type Messages } from "./i18n.ts";
 
 export interface RenderOptions {
   /** GitHub login (lowercased) → kChat username. */
   team: Map<string, string>;
   excerptLength: number;
+  locale: Locale;
   /** Timezone for dates shown in replayed history. */
   timezone?: string;
 }
@@ -70,10 +72,13 @@ function prRef(pr: LinkedPr, issueRepo: string): string {
 }
 
 const TYPE_EMOJI: Record<string, string> = { bug: "🐛", feature: "✨", task: "📋" };
-const PR_STATE: Record<PrState, string> = { open: "🟢 ouverte", merged: "🟣 mergée", closed: "🔴 fermée" };
 
 export class Renderer {
-  constructor(private readonly opts: RenderOptions) {}
+  private readonly t: Messages;
+
+  constructor(private readonly opts: RenderOptions) {
+    this.t = MESSAGES[opts.locale];
+  }
 
   /** `@kchat` for a mapped user, a bold GitHub profile link otherwise. */
   mention(login: string): string {
@@ -97,37 +102,40 @@ export class Renderer {
     // `---` from turning the previous line into a setext heading.
     const header = `---\n\n#### ${emoji} ${gone ? `~~${title}~~` : title}`;
 
-    const status: string[] = [`Statut : ${this.status(issue, duplicateOf, gone)}`];
-    if (issue.type) status.push(`Type : ${plain(issue.type)}`);
-    if (issue.labels.length) status.push(`Labels : ${issue.labels.map((l) => codeSpan(neutralizeMentions(l))).join(", ")}`);
-    if (issue.milestone) status.push(`Milestone : ${plain(issue.milestone)}`);
+    const { field, colon } = this.t;
+    const status: string[] = [`${field.status}${colon}${this.status(issue, duplicateOf, gone)}`];
+    if (issue.type) status.push(`${field.type}${colon}${plain(issue.type)}`);
+    if (issue.labels.length) status.push(`${field.labels}${colon}${issue.labels.map((l) => codeSpan(neutralizeMentions(l))).join(", ")}`);
+    if (issue.milestone) status.push(`${field.milestone}${colon}${plain(issue.milestone)}`);
 
+    const assignees = issue.assignees.map((a) => this.mention(a)).join(", ") || "—";
     const people = [
-      `${issue.assignees.length > 1 ? "Assignees" : "Assignee"} : ${issue.assignees.map((a) => this.mention(a)).join(", ") || "—"}`,
-      `Auteur : ${this.user(issue.author)}`,
+      `${issue.assignees.length > 1 ? field.assignees : field.assignee}${colon}${assignees}`,
+      `${field.author}${colon}${this.user(issue.author)}`,
     ];
 
     const lines = [header, status.join(" · "), people.join(" · ")];
     if (prs.length) {
       const list = [...prs]
         .sort((a, b) => a.repo.localeCompare(b.repo) || a.number - b.number)
-        .map((pr) => `[${prRef(pr, repo)}](${pr.url}) (${PR_STATE[pr.state]})`);
-      lines.push(`PRs liées : ${list.join(", ")}`);
+        .map((pr) => `[${prRef(pr, repo)}](${pr.url}) (${this.t.prState[pr.state]})`);
+      lines.push(`${field.linkedPrs}${colon}${list.join(", ")}`);
     }
     return lines.join("\n");
   }
 
   private status(issue: IssueSnapshot, duplicateOf: number | null, gone: Gone | null): string {
-    if (gone === "transferred") return "➡️ Transférée";
-    if (gone === "deleted") return "🗑️ Supprimée";
-    if (issue.state === "open") return "🟢 Ouverte";
+    const s = this.t.status;
+    if (gone === "transferred") return s.transferred;
+    if (gone === "deleted") return s.deleted;
+    if (issue.state === "open") return s.open;
     switch (issue.stateReason) {
       case "not_planned":
-        return "🚫 Fermée (not planned)";
+        return s.notPlanned;
       case "duplicate":
-        return duplicateOf ? `🔁 Doublon de #${duplicateOf}` : "🔁 Fermée (doublon)";
+        return duplicateOf ? s.duplicateOf(duplicateOf) : s.duplicate;
       default:
-        return "✅ Fermée (completed)";
+        return s.completed;
     }
   }
 
@@ -137,7 +145,7 @@ export class Renderer {
       .replace(/\r\n/g, "\n")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
-    if (!text) return "> _(commentaire vide)_";
+    if (!text) return `> ${this.t.emptyComment}`;
     const max = this.opts.excerptLength;
     let cut = text;
     if (text.length > max) {
@@ -156,7 +164,7 @@ export class Renderer {
   }
 
   commented(author: string, body: string | null | undefined): string {
-    return `💬 ${this.user(author)} a commenté :\n${this.excerpt(body)}`;
+    return `${this.t.commented(this.user(author))}\n${this.excerpt(body)}`;
   }
 
   /**
@@ -165,68 +173,66 @@ export class Renderer {
    */
   assigned(assignee: string, actor: string): string {
     const who = this.mention(assignee);
-    return assignee.toLowerCase() === actor.toLowerCase()
-      ? `👤 ${who} s'est assigné l'issue`
-      : `👤 Assignée à ${who} par ${this.user(actor)}`;
+    return assignee.toLowerCase() === actor.toLowerCase() ? this.t.selfAssigned(who) : this.t.assigned(who, this.user(actor));
   }
 
   unassigned(assignee: string, actor: string): string {
     return assignee.toLowerCase() === actor.toLowerCase()
-      ? `👤 ${this.user(assignee)} s'est retiré de l'issue`
-      : `👤 ${this.user(assignee)} retiré de l'issue par ${this.user(actor)}`;
+      ? this.t.selfUnassigned(this.user(assignee))
+      : this.t.unassigned(this.user(assignee), this.user(actor));
   }
 
   closed(issue: IssueSnapshot, actor: string, duplicateOf: number | null): string {
-    const by = `par ${this.user(actor)}`;
+    const by = this.user(actor);
     switch (issue.stateReason) {
       case "not_planned":
-        return `🚫 Fermée (not planned) ${by}`;
+        return this.t.closedNotPlanned(by);
       case "duplicate":
-        return duplicateOf ? `🔁 Fermée comme doublon de #${duplicateOf} ${by}` : `🔁 Fermée comme doublon ${by}`;
+        return duplicateOf ? this.t.closedDuplicateOf(duplicateOf, by) : this.t.closedDuplicate(by);
       default:
-        return `✅ Fermée (completed) ${by}`;
+        return this.t.closedCompleted(by);
     }
   }
 
   reopened(actor: string): string {
-    return `🔓 Rouverte par ${this.user(actor)}`;
+    return this.t.reopened(this.user(actor));
   }
 
   renamed(from: string, to: string, actor: string): string {
-    return `✏️ Titre modifié par ${this.user(actor)} : ~~${plain(from)}~~ → **${plain(to)}**`;
+    return this.t.renamed(plain(from), plain(to), this.user(actor));
   }
 
   labeled(label: string, added: boolean, actor: string): string {
     const tag = codeSpan(neutralizeMentions(label));
-    return added ? `🏷️ Label ${tag} ajouté par ${this.user(actor)}` : `🏷️ Label ${tag} retiré par ${this.user(actor)}`;
+    return added ? this.t.labelAdded(tag, this.user(actor)) : this.t.labelRemoved(tag, this.user(actor));
   }
 
   typed(type: string | null, actor: string): string {
-    return type ? `🏷️ Type défini sur **${plain(type)}** par ${this.user(actor)}` : `🏷️ Type retiré par ${this.user(actor)}`;
+    return type ? this.t.typeSet(plain(type), this.user(actor)) : this.t.typeRemoved(this.user(actor));
   }
 
   milestoned(milestone: string | null, actor: string): string {
-    return milestone ? `🎯 Milestone **${plain(milestone)}** par ${this.user(actor)}` : `🎯 Milestone retirée par ${this.user(actor)}`;
+    return milestone ? this.t.milestoneSet(plain(milestone), this.user(actor)) : this.t.milestoneRemoved(this.user(actor));
   }
 
   transferred(to: string | null, actor: string): string {
-    return `➡️ Transférée${to ? ` vers ${plain(to)}` : ""} par ${this.user(actor)}`;
+    return this.t.transferred(to ? plain(to) : null, this.user(actor));
   }
 
   deleted(actor: string): string {
-    return `🗑️ Supprimée par ${this.user(actor)}`;
+    return this.t.deleted(this.user(actor));
   }
 
   prLinked(pr: LinkedPr, issueRepo: string, author: string): string {
-    return `🔀 PR liée : ${prRef(pr, issueRepo)} ${plain(pr.title)} par ${this.user(author)}`;
+    return this.t.prLinked(prRef(pr, issueRepo), plain(pr.title), this.user(author));
   }
 
   prMerged(pr: LinkedPr, issueRepo: string, actor: string): string {
-    return `🟣 PR ${prRef(pr, issueRepo)} mergée par ${this.user(actor)}`;
+    return this.t.prMerged(prRef(pr, issueRepo), this.user(actor));
   }
 
   prClosed(pr: LinkedPr, issueRepo: string, actor: string): string {
-    return `🔴 PR ${prRef(pr, issueRepo)} fermée sans merge par ${this.user(actor)}`;
+    return this.t.prClosed(prRef(pr, issueRepo), this.user(actor));
   }
 
   /**
@@ -234,7 +240,7 @@ export class Renderer {
    * Use a renderer without team mapping so history never mentions anyone.
    */
   historyEntry(e: HistoryEvent, issue: IssueSnapshot, repo: string): string {
-    const date = new Intl.DateTimeFormat("fr-CH", {
+    const date = new Intl.DateTimeFormat(this.t.dateLocale, {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",

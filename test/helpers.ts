@@ -14,6 +14,8 @@ export function fixture<T = GhIssue>(name: string): T {
 export function testConfig(overrides: Record<string, unknown> = {}): Config {
   return buildConfig(
     {
+      // Existing assertions are written against the French messages.
+      locale: "fr",
       kchat: { url: "https://chat.example.com", team: "acme" },
       repos: [{ repo: REPO, channel: "github-issues" }],
       team: { "rob-dev": "rob.dev", "alice-dev": "alice.dev" },

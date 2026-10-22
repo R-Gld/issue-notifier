@@ -1,6 +1,7 @@
 import { findRepo, type Config, type RepoConfig, type ReplyEvent } from "./config.ts";
 import { isBot, toSnapshot, type GhIssue, type Gone, type IssueRef, type IssueSnapshot, type LinkedPr } from "./domain.ts";
 import type { GitHubApi } from "./github.ts";
+import type { Locale } from "./i18n.ts";
 import { PostMissingError, type Chat } from "./kchat.ts";
 import { log } from "./log.ts";
 import { extractIssueRefs } from "./refs.ts";
@@ -64,9 +65,8 @@ interface ApplyOptions {
 export const MAX_PR_REFS = 10;
 
 export class Notifier {
-  private readonly render: Renderer;
-  /** Renders replayed history: no team mapping, so it never mentions anyone. */
-  private readonly quietRender: Renderer;
+  /** Per locale: the live renderer, and one without team mapping for history, which never mentions anyone. */
+  private readonly renderers = new Map<Locale, { live: Renderer; quiet: Renderer }>();
   private queue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -76,9 +76,16 @@ export class Notifier {
     private readonly github: GitHubApi,
     /** Pause between replayed history posts, to stay clear of kChat rate limits. */
     private readonly historyDelayMs = 150,
-  ) {
-    this.render = new Renderer({ team: config.team, excerptLength: config.excerptLength });
-    this.quietRender = new Renderer({ team: new Map(), excerptLength: config.excerptLength, timezone: config.reconcile.timezone });
+  ) {}
+
+  private renderer(repo: RepoConfig, quiet = false): Renderer {
+    let r = this.renderers.get(repo.locale);
+    if (!r) {
+      const base = { excerptLength: this.config.excerptLength, locale: repo.locale, timezone: this.config.reconcile.timezone };
+      r = { live: new Renderer({ ...base, team: this.config.team }), quiet: new Renderer({ ...base, team: new Map() }) };
+      this.renderers.set(repo.locale, r);
+    }
+    return quiet ? r.quiet : r.live;
   }
 
   /**
@@ -116,7 +123,7 @@ export class Notifier {
     if (isBot(p.sender)) return;
     const issue = toSnapshot(p.issue);
     const actor = p.sender.login;
-    const r = this.render;
+    const r = this.renderer(repo);
     const apply = (opts: ApplyOptions = {}): Promise<void> =>
       this.apply(repo, issue, { historyBefore: p.issue.updated_at ?? p.issue.created_at, ...opts });
 
@@ -172,7 +179,7 @@ export class Notifier {
   private async onIssueComment(repo: RepoConfig, p: IssueCommentPayload): Promise<void> {
     if (p.action !== "created" || p.issue.pull_request || isBot(p.comment.user)) return;
     const issue = toSnapshot(p.issue);
-    const message = this.render.commented(p.comment.user.login, p.comment.body);
+    const message = this.renderer(repo).commented(p.comment.user.login, p.comment.body);
     return this.apply(repo, issue, { historyBefore: p.comment.created_at, reply: { event: "commented", message } });
   }
 
@@ -203,8 +210,8 @@ export class Notifier {
           prev === state
             ? null
             : state === "merged"
-              ? { event: "pr_merged", message: this.render.prMerged(link, issueRepo, p.sender.login) }
-              : { event: "pr_closed", message: this.render.prClosed(link, issueRepo, p.sender.login) },
+              ? { event: "pr_merged", message: this.renderer(issueRepo).prMerged(link, issueRepo.repo, p.sender.login) }
+              : { event: "pr_closed", message: this.renderer(issueRepo).prClosed(link, issueRepo.repo, p.sender.login) },
         );
       }
       return;
@@ -214,7 +221,9 @@ export class Notifier {
     const link: LinkedPr = { repo: repo.repo, number: pr.number, title: pr.title, url: pr.html_url, state: "open" };
     for (const t of refs) {
       await this.linkPr(t, link, pr.created_at, (prev, issueRepo) =>
-        prev === null ? { event: "pr_linked", message: this.render.prLinked(link, issueRepo, pr.user.login) } : null,
+        prev === null
+          ? { event: "pr_linked", message: this.renderer(issueRepo).prLinked(link, issueRepo.repo, pr.user.login) }
+          : null,
       );
     }
   }
@@ -224,14 +233,15 @@ export class Notifier {
     ref: IssueRef,
     pr: LinkedPr,
     historyBefore: string,
-    reply: (prev: LinkedPr["state"] | null, issueRepo: string) => ApplyOptions["reply"],
+    /** Builds the reply, in the language of the issue's repository. */
+    reply: (prev: LinkedPr["state"] | null, issueRepo: RepoConfig) => ApplyOptions["reply"],
   ): Promise<void> {
     const repo = findRepo(this.config, ref.repo);
     if (!repo) return;
     const lookup = await this.github.getIssue(repo.repo, ref.number);
     if (lookup.kind !== "issue") return;
     const prev = this.store.upsertLinkedPr({ repo: repo.repo, number: ref.number }, pr);
-    await this.apply(repo, lookup.issue, { historyBefore, reply: reply(prev, repo.repo) });
+    await this.apply(repo, lookup.issue, { historyBefore, reply: reply(prev, repo) });
   }
 
   private async findDuplicate(repo: RepoConfig, issueNumber: number): Promise<number | null> {
@@ -263,7 +273,7 @@ export class Notifier {
     const duplicateOf =
       issue.stateReason === "duplicate" ? (opts.duplicateOf ?? thread?.duplicateOf ?? null) : null;
     const gone = opts.gone ?? null;
-    const rootMessage = this.render.root({
+    const rootMessage = this.renderer(repo).root({
       repo: repo.repo,
       showRepo: repo.sharedChannel,
       issue,
@@ -323,7 +333,7 @@ export class Notifier {
     try {
       const entries = (await this.github.history(repo.repo, issue.number)).filter((e) => !before || e.at < before);
       for (let i = cursor; i < entries.length; i++) {
-        await this.chat.createPost(channelId, this.quietRender.historyEntry(entries[i]!, issue, repo.repo), postId);
+        await this.chat.createPost(channelId, this.renderer(repo, true).historyEntry(entries[i]!, issue, repo.repo), postId);
         this.store.setHistoryProgress(ref, i + 1, false);
         if (this.historyDelayMs) await new Promise((r) => setTimeout(r, this.historyDelayMs));
       }

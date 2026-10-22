@@ -81,4 +81,12 @@ describe("config", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("defaults to English and lets repositories pick their language", () => {
+    const file = { kchat: { url: "https://c.example", team: "t" }, repos: [{ repo: REPO, channel: "a" }, { repo: OTHER_REPO, channel: "b", locale: "fr" }] };
+    const env = { KCHAT_TOKEN: "t", GITHUB_WEBHOOK_SECRET: "s" };
+    expect(buildConfig(file, env).repos.map((r) => r.locale)).toEqual(["en", "fr"]);
+    expect(buildConfig({ ...file, locale: "fr" }, env).repos.map((r) => r.locale)).toEqual(["fr", "fr"]);
+    expect(() => buildConfig({ ...file, locale: "de" }, env)).toThrow();
+  });
 });

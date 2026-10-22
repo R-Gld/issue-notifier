@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
+import { LOCALES, type Locale } from "./i18n.ts";
 
 /** Events that can post a reply in an issue thread. The root post is always kept up to date. */
 export const REPLY_EVENTS = [
@@ -45,6 +46,8 @@ const DEFAULT_EVENTS: Record<ReplyEvent, boolean> = {
 const eventsSchema = z.partialRecord(z.enum(REPLY_EVENTS), z.boolean()).nullish().transform((v) => v ?? {});
 
 const fileSchema = z.object({
+  /** Language of the messages; each repository can override it. */
+  locale: z.enum(LOCALES).default("en"),
   kchat: z.object({
     url: z.url(),
     /** Default kChat team of the channels. */
@@ -60,6 +63,7 @@ const fileSchema = z.object({
         repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/, "expected owner/name"),
         channel: z.string().min(1),
         kchatTeam: z.string().min(1).optional(),
+        locale: z.enum(LOCALES).optional(),
         events: eventsSchema,
       }),
     )
@@ -89,6 +93,7 @@ export interface RepoConfig {
   repo: string;
   kchatTeam: string;
   channel: string;
+  locale: Locale;
   events: Record<ReplyEvent, boolean>;
   /** The channel also receives other repositories: thread titles name the repository. */
   sharedChannel: boolean;
@@ -118,6 +123,7 @@ export function buildConfig(file: unknown, env: NodeJS.ProcessEnv): Config {
       repo: r.repo,
       kchatTeam: r.kchatTeam ?? f.kchat.team,
       channel: r.channel,
+      locale: r.locale ?? f.locale,
       events: { ...DEFAULT_EVENTS, ...f.events, ...r.events },
       sharedChannel: perChannel.get(channelKey(r))! > 1,
     })),

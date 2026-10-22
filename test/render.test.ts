@@ -3,7 +3,7 @@ import { toSnapshot } from "../src/domain.ts";
 import { plain, Renderer } from "../src/render.ts";
 import { fixture, OTHER_REPO, REPO } from "./helpers.ts";
 
-const render = new Renderer({ team: new Map([["rob-dev", "rob.dev"], ["alice-dev", "alice.dev"]]), excerptLength: 300 });
+const render = new Renderer({ team: new Map([["rob-dev", "rob.dev"], ["alice-dev", "alice.dev"]]), excerptLength: 300, locale: "fr" });
 // The real #1201 has a `bug` label but no issue type yet.
 const open = { ...toSnapshot(fixture("issue-1201")), type: "Bug" };
 const closed = toSnapshot(fixture("issue-1202"));
@@ -172,7 +172,7 @@ describe("GitHub text never becomes a link, a mention or broken markup", () => {
   });
 
   it("never splits an emoji when truncating", () => {
-    const short = new Renderer({ team: new Map(), excerptLength: 10 });
+    const short = new Renderer({ team: new Map(), excerptLength: 10, locale: "fr" });
     const text = "aaaaaaaaa😀 more text";
     const out = short.excerpt(text);
     expect(out).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
@@ -180,7 +180,7 @@ describe("GitHub text never becomes a link, a mention or broken markup", () => {
   });
 
   it("handles CRLF, long words and blank comments", () => {
-    const short = new Renderer({ team: new Map(), excerptLength: 20 });
+    const short = new Renderer({ team: new Map(), excerptLength: 20, locale: "fr" });
     expect(short.excerpt("a\r\nb")).toBe("> a\n> b");
     expect(short.excerpt("x".repeat(50))).toBe(`> ${"x".repeat(20)}…`);
     expect(short.excerpt("   \n\n  ")).toBe("> _(commentaire vide)_");
@@ -195,7 +195,7 @@ describe("GitHub text never becomes a link, a mention or broken markup", () => {
 });
 
 describe("history entries", () => {
-  const quiet = new Renderer({ team: new Map(), excerptLength: 300, timezone: "Europe/Zurich" });
+  const quiet = new Renderer({ team: new Map(), excerptLength: 300, timezone: "Europe/Zurich", locale: "fr" });
   const base = { at: "2026-01-15T23:30:00Z", actor: "rob-dev" };
 
   it("dates entries in the configured timezone, across a day boundary", () => {
@@ -286,7 +286,7 @@ describe("mentions can never be rebuilt from GitHub text", () => {
     // Deterministic PRNG so a failure is reproducible.
     let seed = 42;
     const rand = (n: number) => ((seed = (seed * 1103515245 + 12345) % 2 ** 31), seed % n);
-    const short = new Renderer({ team: new Map(), excerptLength: 40 });
+    const short = new Renderer({ team: new Map(), excerptLength: 40, locale: "fr" });
     for (let i = 0; i < 5000; i++) {
       const text = Array.from({ length: 1 + rand(12) }, () => fragments[rand(fragments.length)]).join("");
       for (const out of [render.excerpt(text), short.excerpt(text), plain(text)]) {
