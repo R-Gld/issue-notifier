@@ -33,15 +33,84 @@ kChat is built on Mattermost and this service only uses the Mattermost API v4, s
 - Admin rights on the GitHub repositories (or the organization), to create the webhooks.
 - A kChat/Mattermost bot account added to every target channel.
 
+## Installation
+
+The image is published to GitHub Container Registry as `ghcr.io/r-gld/issue-notifier`:
+
+| Tag | Content |
+|---|---|
+| `latest`, `1.2.3`, `1.2` | Releases (git tags `v*`) |
+| `main` | Last commit of `main` that passed the tests |
+| `sha-<commit>` | A given commit |
+
+The package is private: log in once with a GitHub token (classic, `read:packages` scope only):
+
+```sh
+echo <token> | docker login ghcr.io -u <github-login> --password-stdin
+```
+
+### With the prebuilt image
+
+Nothing to clone. In a directory of your choice, for example `/opt/issue-notifier`, create these three files:
+
+**`compose.yml`**
+
+```yaml
+services:
+  issue-notifier:
+    image: ghcr.io/r-gld/issue-notifier:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CONFIG_PATH: /app/config.yml
+      DB_PATH: /app/data/issue-notifier.db
+    ports:
+      - "127.0.0.1:3080:3000"
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      - data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  data:
+```
+
+**`config.yml`**: start from [`config.example.yml`](config.example.yml), see [Configuration](#configuration).
+
+**`.env`** (`chmod 600 .env`): see [`.env.example`](.env.example).
+
+```sh
+docker compose pull
+docker compose up -d
+docker compose logs -f
+```
+
+Set `IMAGE_TAG` (in `.env` or the shell) to pin a version, e.g. `IMAGE_TAG=1.0.0`.
+
+### From source
+
+```sh
+git clone https://github.com/R-Gld/issue-notifier.git && cd issue-notifier
+cp config.example.yml config.yml && cp .env.example .env && chmod 600 .env
+# edit config.yml and .env
+docker compose up -d --build
+```
+
+The repository's `compose.yml` is the same as above, plus `build: .`.
+
 ## Setup
 
 1. **Chat bot**: create a bot account (Integrations → Bot accounts), add it to each channel and copy its token.
-2. **Configuration**: `cp config.example.yml config.yml`, then set `kchat.url`, the default `kchat.team`, the `repos` list and the `team` mapping (GitHub login → chat username). `config.yml` is git-ignored. See [Configuration](#configuration), and [Finding the kChat values](#finding-the-kchat-values) to read them from a kSuite URL.
-3. **Secrets**: `cp .env.example .env` (keep it `chmod 600`), then fill in:
+2. **Configuration** (`config.yml`): set `kchat.url`, the default `kchat.team`, the `repos` list and the `team` mapping (GitHub login → chat username). See [Configuration](#configuration), and [Finding the kChat values](#finding-the-kchat-values) to read them from a kSuite URL.
+3. **Secrets** (`.env`):
    - `KCHAT_TOKEN`: the bot token.
    - `GITHUB_WEBHOOK_SECRET`: a random value, e.g. `openssl rand -hex 32`.
    - `GITHUB_TOKEN`: for public repositories, a classic token with no scope or a fine-grained token with read-only access to public repositories. For **private repositories** it is required: a fine-grained token with read-only *Issues*, *Pull requests* and *Metadata* permissions on those repositories (or a classic token with the `repo` scope). Without a token, the GitHub API limit is 60 requests per hour, which the history replay exhausts quickly, and duplicate resolution ("Doublon de #N") is disabled. **Write down its expiry date**: an expired token only shows up in the logs.
-4. **Start**: `docker compose up -d --build`, then `docker compose logs -f`. The service checks every channel at startup and exits if one cannot be found. On first start, a thread is created for every open issue. The service listens on `127.0.0.1:3080`.
+4. **Start**: see [Installation](#installation). The service checks every channel at startup and exits if one cannot be found. On first start, a thread is created for every open issue. It listens on `127.0.0.1:3080`.
 5. **Reverse proxy** (Apache example, as root):
    ```sh
    cp deploy/apache-vhost.conf /etc/apache2/sites-available/gh-issues.conf
@@ -107,7 +176,7 @@ A repository posts into exactly one channel. Data written before multi-repositor
 ## Operations
 
 - Change the configuration: edit `config.yml`, then `docker compose restart`.
-- Update the code: `git pull && docker compose up -d --build`.
+- Update: `docker compose pull && docker compose up -d` (prebuilt image), or `git pull && docker compose up -d --build` (from source).
 - Health check: `curl https://<your-host>/health`.
 - State (issue → thread mapping, linked PRs, history progress) lives in the `data` Docker volume.
 - **Adding a repository**: add it to `repos`, add the bot to its channel, create its webhook, then `docker compose restart`. Its open issues get threads right away.
@@ -119,6 +188,16 @@ A repository posts into exactly one channel. Data written before multi-repositor
 ### Translations
 
 Messages live in `src/i18n.ts`, one dictionary per language. To add a language, add a dictionary to `MESSAGES` and its code to `LOCALES`; the type checker and `test/i18n.test.ts` make sure no message is missing. Logs stay in English.
+
+## Releases
+
+CI (`.github/workflows/ci.yml`) runs the typecheck and the tests with coverage on every push and pull request. On `main`, it then publishes the image as `main` and `sha-<commit>`. To release, tag the commit and push the tag:
+
+```sh
+git tag -s v1.2.3 -m v1.2.3 && git push origin v1.2.3
+```
+
+CI publishes `1.2.3`, `1.2` and `latest`. Pull requests only check that the image builds.
 
 ## Development
 

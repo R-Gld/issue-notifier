@@ -1,7 +1,8 @@
 services:
   issue-notifier:
+    # Prebuilt image: `docker compose pull`. From source: `docker compose up -d --build`.
+    image: ghcr.io/r-gld/issue-notifier:${IMAGE_TAG:-latest}
     build: .
-    image: issue-notifier
     restart: unless-stopped
     env_file: .env
     environment:
