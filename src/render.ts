@@ -32,6 +32,14 @@ export function neutralizeMentions(text: string): string {
  * neither previews them nor inlines images.
  */
 export function defuseUrls(text: string): string {
+  // Code is left alone: kChat never links or previews inside it.
+  return text
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/)
+    .map((part, i) => (i % 2 ? part : defuseProse(part)))
+    .join("");
+}
+
+function defuseProse(text: string): string {
   const code = (url: string) => `\`${url}\``;
   return text
     .replace(/!\[[^\]]*\]\((\S+?)\)/g, (_m, url: string) => `🖼️ ${code(url)}`)
@@ -41,6 +49,16 @@ export function defuseUrls(text: string): string {
       const trailing = /[.,;:!?]+$/.exec(url)?.[0] ?? "";
       return code(url.slice(0, url.length - trailing.length)) + trailing;
     });
+}
+
+/** Inline text from GitHub (titles, labels, milestones…): no mentions, no links. */
+export function plain(text: string): string {
+  return defuseUrls(neutralizeMentions(text));
+}
+
+/** A code span that survives backticks in its content. */
+function codeSpan(text: string): string {
+  return text.includes("`") ? `\`\` ${text} \`\`` : `\`${text}\``;
 }
 
 const shortName = (repo: string) => repo.slice(repo.indexOf("/") + 1);
@@ -73,15 +91,15 @@ export class Renderer {
   root({ repo, showRepo, issue, prs, duplicateOf, gone }: RootState): string {
     const emoji = TYPE_EMOJI[issue.type?.toLowerCase() ?? ""] ?? "📝";
     const ref = `${showRepo ? shortName(repo) : ""}#${issue.number}`;
-    const title = `[${ref}](${issue.url}) · ${neutralizeMentions(issue.title)}`;
+    const title = `[${ref}](${issue.url}) · ${plain(issue.title)}`;
     // A rule plus a heading so each thread stands out in the channel. The blank line keeps
     // `---` from turning the previous line into a setext heading.
     const header = `---\n\n#### ${emoji} ${gone ? `~~${title}~~` : title}`;
 
     const status: string[] = [`Statut : ${this.status(issue, duplicateOf, gone)}`];
-    if (issue.type) status.push(`Type : ${issue.type}`);
-    if (issue.labels.length) status.push(`Labels : ${issue.labels.map((l) => `\`${neutralizeMentions(l)}\``).join(", ")}`);
-    if (issue.milestone) status.push(`Milestone : ${neutralizeMentions(issue.milestone)}`);
+    if (issue.type) status.push(`Type : ${plain(issue.type)}`);
+    if (issue.labels.length) status.push(`Labels : ${issue.labels.map((l) => codeSpan(neutralizeMentions(l))).join(", ")}`);
+    if (issue.milestone) status.push(`Milestone : ${plain(issue.milestone)}`);
 
     const people = [
       `${issue.assignees.length > 1 ? "Assignees" : "Assignee"} : ${issue.assignees.map((a) => this.mention(a)).join(", ") || "—"}`,
@@ -122,7 +140,9 @@ export class Renderer {
     const max = this.opts.excerptLength;
     let cut = text;
     if (text.length > max) {
-      const slice = text.slice(0, max);
+      let slice = text.slice(0, max);
+      // Never split an emoji (surrogate pair) in half.
+      if (/[\uD800-\uDBFF]$/.test(slice)) slice = slice.slice(0, -1);
       const space = slice.lastIndexOf(" ");
       cut = `${(space > max * 0.6 ? slice.slice(0, space) : slice).trimEnd()}…`;
     }
@@ -170,24 +190,24 @@ export class Renderer {
   }
 
   renamed(from: string, to: string, actor: string): string {
-    return `✏️ Titre modifié par ${this.user(actor)} : ~~${neutralizeMentions(from)}~~ → **${neutralizeMentions(to)}**`;
+    return `✏️ Titre modifié par ${this.user(actor)} : ~~${plain(from)}~~ → **${plain(to)}**`;
   }
 
   labeled(label: string, added: boolean, actor: string): string {
-    label = neutralizeMentions(label);
-    return added ? `🏷️ Label \`${label}\` ajouté par ${this.user(actor)}` : `🏷️ Label \`${label}\` retiré par ${this.user(actor)}`;
+    const tag = codeSpan(neutralizeMentions(label));
+    return added ? `🏷️ Label ${tag} ajouté par ${this.user(actor)}` : `🏷️ Label ${tag} retiré par ${this.user(actor)}`;
   }
 
   typed(type: string | null, actor: string): string {
-    return type ? `🏷️ Type défini sur **${type}** par ${this.user(actor)}` : `🏷️ Type retiré par ${this.user(actor)}`;
+    return type ? `🏷️ Type défini sur **${plain(type)}** par ${this.user(actor)}` : `🏷️ Type retiré par ${this.user(actor)}`;
   }
 
   milestoned(milestone: string | null, actor: string): string {
-    return milestone ? `🎯 Milestone **${neutralizeMentions(milestone)}** par ${this.user(actor)}` : `🎯 Milestone retirée par ${this.user(actor)}`;
+    return milestone ? `🎯 Milestone **${plain(milestone)}** par ${this.user(actor)}` : `🎯 Milestone retirée par ${this.user(actor)}`;
   }
 
   transferred(to: string | null, actor: string): string {
-    return `➡️ Transférée${to ? ` vers ${to}` : ""} par ${this.user(actor)}`;
+    return `➡️ Transférée${to ? ` vers ${plain(to)}` : ""} par ${this.user(actor)}`;
   }
 
   deleted(actor: string): string {
@@ -195,7 +215,7 @@ export class Renderer {
   }
 
   prLinked(pr: LinkedPr, issueRepo: string, author: string): string {
-    return `🔀 PR liée : ${prRef(pr, issueRepo)} ${neutralizeMentions(pr.title)} par ${this.user(author)}`;
+    return `🔀 PR liée : ${prRef(pr, issueRepo)} ${plain(pr.title)} par ${this.user(author)}`;
   }
 
   prMerged(pr: LinkedPr, issueRepo: string, actor: string): string {

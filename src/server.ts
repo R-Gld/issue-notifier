@@ -66,7 +66,10 @@ export function createApp(deps: { secret: string; repos: readonly string[]; noti
       action: (payload as { action?: string }).action,
       delivery,
     });
-    void deps.notifier.enqueue(`${event} ${delivery}`, () => deps.notifier.handleEvent(event, payload));
+    // GitHub keeps the delivery id on manual redeliveries: forget failed ones so they can be retried.
+    void deps.notifier.enqueue(`${event} ${delivery}`, () => deps.notifier.handleEvent(event, payload)).then((ok) => {
+      if (!ok && delivery) deps.store.forgetDelivery(delivery);
+    });
     return send(202, "accepted");
   });
 }

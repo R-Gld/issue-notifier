@@ -192,6 +192,11 @@ export class Store {
     return res.changes > 0;
   }
 
+  /** Lets a delivery be processed again, e.g. when GitHub redelivers an event that failed. */
+  forgetDelivery(id: string): void {
+    this.db.prepare(`DELETE FROM deliveries WHERE id = ?`).run(id);
+  }
+
   close(): void {
     this.db.close();
   }

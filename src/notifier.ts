@@ -75,10 +75,19 @@ export class Notifier {
     this.quietRender = new Renderer({ team: new Map(), excerptLength: config.excerptLength, timezone: config.reconcile.timezone });
   }
 
-  /** Runs tasks one at a time so concurrent events on one issue never race to create its thread. */
-  enqueue(name: string, task: () => Promise<void>): Promise<void> {
-    const run = this.queue.then(task).catch((err: unknown) => log.error(`${name} failed`, { err }));
-    this.queue = run;
+  /**
+   * Runs tasks one at a time so concurrent events on one issue never race to create its thread.
+   * Resolves to false when the task failed; a failure never blocks the tasks queued after it.
+   */
+  enqueue(name: string, task: () => Promise<void>): Promise<boolean> {
+    const run = this.queue.then(task).then(
+      () => true,
+      (err: unknown) => {
+        log.error(`${name} failed`, { err });
+        return false;
+      },
+    );
+    this.queue = run.then(() => undefined);
     return run;
   }
 
@@ -137,13 +146,16 @@ export class Notifier {
         return apply({ reply: { event: "reopened", message: r.reopened(actor) } });
       case "transferred": {
         const target = p.changes?.new_repository?.full_name ?? null;
-        await apply({ gone: "transferred", reply: { event: "transferred", message: r.transferred(target, actor) } });
+        // An issue that never had a thread does not get one just to say it left.
+        if (this.store.getThread({ repo: repo.repo, number: issue.number }))
+          await apply({ gone: "transferred", reply: { event: "transferred", message: r.transferred(target, actor) } });
         // Moved to another configured repository: it gets a thread in that repository's channel.
         const targetRepo = findRepo(this.config, target);
         if (targetRepo && p.changes?.new_issue) await this.apply(targetRepo, toSnapshot(p.changes.new_issue));
         return;
       }
       case "deleted":
+        if (!this.store.getThread({ repo: repo.repo, number: issue.number })) return;
         return apply({ gone: "deleted", reply: { event: "deleted", message: r.deleted(actor) } });
       default:
         // pinned, locked… : nothing shown, but keep the root in sync if the thread exists.
