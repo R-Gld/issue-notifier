@@ -6,7 +6,7 @@ Notifie un canal kChat des événements d'issues GitHub de `acme/widgets` : **un
 
 - GitHub envoie ses webhooks (`issues`, `issue_comment`, `pull_request`) sur `https://gh-issues.example.com/webhook`. La signature HMAC est vérifiée et les livraisons en double sont ignorées.
 - Le bot kChat crée le thread de l'issue au premier événement qui la concerne, met à jour le message principal en place, puis poste une réponse si l'événement est activé dans `config.yml`.
-- **Mentions** : l'assignee est mentionné quand une personne hors équipe commente, ou quand l'issue est rouverte. L'auteur de l'action n'est jamais mentionné, et rien ne l'est quand l'issue n'a pas d'assignee.
+- **Mentions** : l'assignee est mentionné une seule fois, dans la réponse qui annonce son assignation, même quand il s'assigne lui-même. Cette mention lui fait suivre le thread : les réponses suivantes lui parviennent par « Fils de discussion », sans `cc`. Un thread créé alors que l'issue a déjà un assignee le mentionne dans son message principal. Seuls les membres du mapping `team` sont mentionnés.
 - **PRs liées** : `#N`, `fixes #N`, `owner/repo#N` ou l'URL de l'issue dans le titre ou le corps d'une PR.
 - **Historique** : à sa création, un thread reçoit tous les commentaires et événements passés de l'issue, dans l'ordre et datés, sans aucune mention. En cas d'erreur, la reprise continue là où elle s'était arrêtée.
 - **Réconciliation** au démarrage puis tous les jours à 6h (Europe/Zurich) : création des threads manquants pour les issues ouvertes, mise à jour des messages principaux et fin des reprises d'historique interrompues. Les événements arrivés pendant une panne du service ne sont pas rattrapés dans les threads existants.
@@ -16,7 +16,7 @@ Notifie un canal kChat des événements d'issues GitHub de `acme/widgets` : **un
 
 - Message principal : un séparateur, puis le titre en `####` avec le lien de l'issue, le statut, le type, les labels, les assignees, l'auteur et les PRs liées.
 - **Pas de liens dans les réponses** : kChat affiche l'aperçu du dernier lien de chaque message, ce qui encombrerait les threads. Les utilisateurs sont donc affichés en **gras** sans lien, et les URL des commentaires sont placées entre backticks. Les images deviennent `🖼️ `url``.
-- **Aucune mention accidentelle** : les `@` des textes GitHub (commentaires, titres, labels) sont neutralisés par un caractère invisible. Seuls les membres du mapping `team` peuvent être mentionnés.
+- **Aucune mention accidentelle** : les `@` des textes GitHub (commentaires, titres, labels) sont neutralisés par un caractère invisible. Seuls les membres du mapping `team` peuvent être mentionnés, et uniquement par le bot.
 
 ## Mise en place
 

@@ -43,19 +43,10 @@ describe("root post", () => {
 });
 
 describe("comments", () => {
-  it("mentions assignees when an outsider comments", () => {
-    const msg = render.commented(open, "outside-user", "Still crashing on 2.1.0");
-    expect(msg).toBe(
-      [
-        "💬 **outside-user** a commenté :",
-        "> Still crashing on 2.1.0",
-        "cc @alice.dev",
-      ].join("\n"),
+  it("quotes the comment without mentioning anyone", () => {
+    expect(render.commented("outside-user", "Still crashing on 2.1.0")).toBe(
+      ["💬 **outside-user** a commenté :", "> Still crashing on 2.1.0"].join("\n"),
     );
-  });
-
-  it("does not mention anyone when a team member comments", () => {
-    expect(render.commented({ ...open, assignees: ["alice-dev", "rob-dev"] }, "rob-dev", "On regarde")).not.toContain("@");
   });
 
   it("truncates long bodies on a word boundary and quotes every line", () => {
@@ -69,13 +60,11 @@ describe("comments", () => {
 });
 
 describe("event replies", () => {
-  it("never mentions the actor", () => {
-    expect(render.assigned("alice-dev", "rob-dev")).toBe(
-      "👤 Assignée à @alice.dev par **rob-dev**",
-    );
-    expect(render.assigned("alice-dev", "alice-dev")).not.toContain("@");
-    expect(render.reopened({ ...open, assignees: ["alice-dev"] }, "alice-dev")).not.toContain("cc");
-    expect(render.reopened({ ...open, assignees: ["alice-dev"] }, "outside-user")).toContain("cc @alice.dev");
+  it("mentions the assignee on assignment only", () => {
+    expect(render.assigned("alice-dev", "rob-dev")).toBe("👤 Assignée à @alice.dev par **rob-dev**");
+    expect(render.assigned("alice-dev", "alice-dev")).toBe("👤 @alice.dev s'est assigné l'issue");
+    expect(render.assigned("unmapped-user", "unmapped-user")).toBe("👤 **unmapped-user** s'est assigné l'issue");
+    expect(render.reopened("outside-user")).toBe("🔓 Rouverte par **outside-user**");
   });
 
   it("describes close reasons", () => {
@@ -86,7 +75,7 @@ describe("event replies", () => {
 
 describe("mention safety", () => {
   it("never lets GitHub text mention kChat users", () => {
-    const msg = render.commented(open, "rob-dev", "Hi @outside-user, cc @channel @all and mail me at a@b.c");
+    const msg = render.commented("rob-dev", "Hi @outside-user, cc @channel @all and mail me at a@b.c");
     expect(msg).not.toMatch(/@[\w.-]/);
     expect(msg).toContain("@⁠outside-user");
     const root = render.root({ issue: { ...open, title: "Ping @here", labels: ["@x"] }, prs: [], duplicateOf: null, gone: null });
@@ -100,7 +89,7 @@ describe("link previews", () => {
   it("keeps replies free of links so kChat shows no preview", () => {
     const pr = { number: 1210, title: "fix", url: "https://github.com/x/pull/1210", state: "merged" as const };
     const replies = [
-      render.commented(open, "outside-user", "see https://example.com"),
+      render.commented("outside-user", "see https://example.com"),
       render.assigned("alice-dev", "rob-dev"),
       render.prLinked(pr, "rob-dev"),
       render.prMerged(pr, "rob-dev"),

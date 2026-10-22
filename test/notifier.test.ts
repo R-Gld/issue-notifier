@@ -54,7 +54,7 @@ describe("issue events", () => {
   it("creates the thread lazily, then replies in it", async () => {
     await comment(issue1201, "outside-user", "Any news?");
     const [root] = chat.roots();
-    expect(chat.replies(root!.id)).toEqual([expect.stringContaining("cc @alice.dev")]);
+    expect(chat.replies(root!.id)).toEqual([expect.stringContaining("Any news?")]);
   });
 
   it("keeps the root in sync and only replies for enabled events", async () => {
@@ -66,7 +66,7 @@ describe("issue events", () => {
 
     await issues("assigned", { ...issue1201, assignees: [{ login: "alice-dev" }, { login: "rob-dev" }] }, { assignee: user("rob-dev") });
     expect(root.message).toContain("Assignees : @alice.dev, @rob.dev");
-    expect(chat.replies(root.id)).toEqual([expect.stringContaining("s'est assigné")]);
+    expect(chat.replies(root.id)).toEqual(["👤 @rob.dev s'est assigné l'issue"]);
   });
 
   it("honours events disabled in the config", async () => {
@@ -223,6 +223,6 @@ describe("history replay", () => {
     });
     const replies = chat.replies(chat.roots()[0]!.id);
     expect(replies).toHaveLength(4);
-    expect(replies.filter((m) => m.includes("Any news?"))).toEqual([expect.stringContaining("cc @alice.dev")]);
+    expect(replies.filter((m) => m.includes("Any news?"))).toHaveLength(1);
   });
 });

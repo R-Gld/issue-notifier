@@ -129,7 +129,7 @@ export class Notifier {
         return apply({ duplicateOf, reply: { event: "closed", message: r.closed(issue, actor, duplicateOf) } });
       }
       case "reopened":
-        return apply({ reply: { event: "reopened", message: r.reopened(issue, actor) } });
+        return apply({ reply: { event: "reopened", message: r.reopened(actor) } });
       case "transferred":
         return apply({
           gone: "transferred",
@@ -146,7 +146,7 @@ export class Notifier {
   private async onIssueComment(p: IssueCommentPayload): Promise<void> {
     if (p.action !== "created" || p.issue.pull_request || isBot(p.comment.user)) return;
     const issue = toSnapshot(p.issue);
-    const message = this.render.commented(issue, p.comment.user.login, p.comment.body);
+    const message = this.render.commented(p.comment.user.login, p.comment.body);
     return this.apply(issue, { historyBefore: p.comment.created_at, reply: { event: "commented", message } });
   }
 

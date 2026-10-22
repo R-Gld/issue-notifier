@@ -45,10 +45,6 @@ const PR_STATE: Record<PrState, string> = { open: "🟢 ouverte", merged: "🟣 
 export class Renderer {
   constructor(private readonly opts: RenderOptions) {}
 
-  isTeam(login: string): boolean {
-    return this.opts.team.has(login.toLowerCase());
-  }
-
   /** `@kchat` for a mapped user, a bold GitHub profile link otherwise. */
   mention(login: string): string {
     const kchat = this.opts.team.get(login.toLowerCase());
@@ -102,16 +98,6 @@ export class Renderer {
     }
   }
 
-  /** `cc @a @b` for the mapped assignees, minus the actor. Empty when nobody is left. */
-  ccAssignees(issue: IssueSnapshot, actor: string): string {
-    const mentions = issue.assignees
-      .filter((a) => a.toLowerCase() !== actor.toLowerCase())
-      .map((a) => this.opts.team.get(a.toLowerCase()))
-      .filter((k): k is string => !!k)
-      .map((k) => `@${k}`);
-    return mentions.length ? `cc ${mentions.join(" ")}` : "";
-  }
-
   excerpt(body: string | null | undefined): string {
     const text = neutralizeMentions(body ?? "")
       .replace(/<!--[\s\S]*?-->/g, "")
@@ -132,18 +118,16 @@ export class Renderer {
       .join("\n");
   }
 
-  commented(issue: IssueSnapshot, author: string, body: string | null | undefined): string {
-    const lines = [`💬 ${this.user(author)} a commenté :`, this.excerpt(body)];
-    // Only outside voices need the assignee's attention.
-    if (!this.isTeam(author)) {
-      const cc = this.ccAssignees(issue, author);
-      if (cc) lines.push(cc);
-    }
-    return lines.join("\n");
+  commented(author: string, body: string | null | undefined): string {
+    return `💬 ${this.user(author)} a commenté :\n${this.excerpt(body)}`;
   }
 
+  /**
+   * The only reply that mentions anyone: even a self-assignment pings, because being mentioned
+   * makes the assignee follow the thread, and later replies then reach them without a cc.
+   */
   assigned(assignee: string, actor: string): string {
-    const who = assignee.toLowerCase() === actor.toLowerCase() ? this.user(assignee) : this.mention(assignee);
+    const who = this.mention(assignee);
     return assignee.toLowerCase() === actor.toLowerCase()
       ? `👤 ${who} s'est assigné l'issue`
       : `👤 Assignée à ${who} par ${this.user(actor)}`;
@@ -167,9 +151,8 @@ export class Renderer {
     }
   }
 
-  reopened(issue: IssueSnapshot, actor: string): string {
-    const cc = this.ccAssignees(issue, actor);
-    return [`🔓 Rouverte par ${this.user(actor)}`, cc].filter(Boolean).join("\n");
+  reopened(actor: string): string {
+    return `🔓 Rouverte par ${this.user(actor)}`;
   }
 
   renamed(from: string, to: string, actor: string): string {
@@ -228,7 +211,7 @@ export class Renderer {
   private historyBody(e: HistoryEvent, issue: IssueSnapshot): string {
     switch (e.kind) {
       case "commented":
-        return this.commented(issue, e.actor, e.body);
+        return this.commented(e.actor, e.body);
       case "assigned":
         return this.assigned(e.assignee, e.actor);
       case "unassigned":
@@ -245,7 +228,7 @@ export class Renderer {
       case "closed":
         return this.closed({ ...issue, stateReason: e.stateReason }, e.actor, null);
       case "reopened":
-        return this.reopened(issue, e.actor);
+        return this.reopened(e.actor);
       case "pr_linked":
         return this.prLinked(e.pr, e.actor);
     }
