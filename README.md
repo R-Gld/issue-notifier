@@ -35,19 +35,13 @@ kChat is built on Mattermost and this service only uses the Mattermost API v4, s
 
 ## Installation
 
-The image is published to GitHub Container Registry as `ghcr.io/r-gld/issue-notifier`:
+The image is published to GitHub Container Registry as `ghcr.io/r-gld/issue-notifier`. It is public: no login is needed to pull it.
 
 | Tag | Content |
 |---|---|
 | `latest`, `1.2.3`, `1.2` | Releases (git tags `v*`) |
 | `main` | Last commit of `main` that passed the tests |
 | `sha-<commit>` | A given commit |
-
-The package is private: log in once with a GitHub token (classic, `read:packages` scope only):
-
-```sh
-echo <token> | docker login ghcr.io -u <github-login> --password-stdin
-```
 
 ### With the prebuilt image
 
