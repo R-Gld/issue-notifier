@@ -35,7 +35,7 @@ kChat is built on Mattermost and this service only uses the Mattermost API v4, s
 
 ## Installation
 
-The image is published to GitHub Container Registry as `ghcr.io/r-gld/issue-notifier`. It is public: no login is needed to pull it.
+The image is published to GitHub Container Registry as `ghcr.io/r-gld/issue-notifier`:
 
 | Tag | Content |
 |---|---|
