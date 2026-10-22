@@ -1,6 +1,9 @@
 # Issue notifier configuration. Secrets live in .env, not here.
 # Apply changes with: docker compose restart
 
+# Language of the messages posted in the chat: en or fr. Each repository can override it.
+locale: en
+
 kchat:
   # Base URL of the kChat / Mattermost API host, without /api/v4.
   # On kChat this is the team's own host, which may differ from the web UI URL.
@@ -18,6 +21,7 @@ repos:
   # - repo: my-org/hardware
   #   channel: hardware-issues
   #   kchatTeam: other-team         # channel of another kChat team
+  #   locale: fr                    # messages in French for this repository
   #   events:                       # overrides the defaults below for this repository
   #     labeled: true
 

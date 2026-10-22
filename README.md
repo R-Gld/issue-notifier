@@ -2,7 +2,7 @@
 
 Mirrors the activity of GitHub issues into kChat channels: **one thread per issue**, with a root post kept up to date (status, type, labels, assignees, linked PRs) and a reply for each notable event. One bot can follow several repositories, each posting into its own channel or sharing a channel with others.
 
-kChat is built on Mattermost and this service only uses the Mattermost API v4, so it should work with any Mattermost server as well. It has only been tested against kChat. Messages posted in the channel are in French.
+kChat is built on Mattermost and this service only uses the Mattermost API v4, so it should work with any Mattermost server as well. It has only been tested against kChat. Messages are available in English and French, per repository.
 
 > [!IMPORTANT]
 > **This is an independent personal project.** It is not affiliated with, endorsed by, sponsored by or supported by Infomaniak Network SA, and it is not an Infomaniak product. "Infomaniak" and "kChat" are trademarks of their respective owners and are mentioned only to describe compatibility. GitHub and Mattermost are likewise trademarks of their respective owners.
@@ -63,6 +63,7 @@ kChat is built on Mattermost and this service only uses the Mattermost API v4, s
 `config.yml` (see `config.example.yml`):
 
 ```yaml
+locale: en                          # en (default) or fr
 kchat:
   url: https://chat.example.com     # API host, without /api/v4
   team: my-team                     # default team of the channels
@@ -74,6 +75,7 @@ repos:
   - repo: my-org/gizmos
     channel: hardware-issues
     kchatTeam: other-team           # optional: channel of another team
+    locale: fr                      # optional: language of this repository's threads
     events: { labeled: true }       # optional: overrides the defaults below
 team:                               # GitHub login → chat username, for every repository
   octocat: octo.cat
@@ -93,6 +95,10 @@ A repository posts into exactly one channel. Data written before multi-repositor
 - **Removing a repository**: remove it from `repos` and delete its webhook. Its threads stay in the channel and are no longer updated.
 - Logs: `docker compose logs -f`, rotated at 3 × 10 MB. Set `DEBUG=1` in `.env` for debug logs.
 - Bot avatar: `deploy/bot-avatar.png` (the GitHub mark). A bot cannot change its own picture; set it from the bot owner's account.
+
+### Translations
+
+Messages live in `src/i18n.ts`, one dictionary per language. To add a language, add a dictionary to `MESSAGES` and its code to `LOCALES`; the type checker and `test/i18n.test.ts` make sure no message is missing. Logs stay in English.
 
 ## Development
 
