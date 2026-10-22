@@ -13,7 +13,7 @@ kchat:
   channel: github-issues
 
 # GitHub login → kChat username (without @).
-# Everyone listed here counts as the team: their comments never trigger mentions.
+# Only users listed here can be @mentioned (when they get assigned); others show in bold.
 team:
   octocat: octo.cat
   jane-doe-gh: jane.doe

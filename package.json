@@ -1,6 +1,9 @@
 {
   "name": "issue-notifier",
   "version": "1.0.0",
+  "description": "Mirrors GitHub issue activity into kChat / Mattermost threads, one thread per issue.",
+  "private": true,
+  "license": "UNLICENSED",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
