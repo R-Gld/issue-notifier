@@ -169,6 +169,12 @@ export class Store {
       .all(key(pr.repo), pr.number) as IssueRef[];
   }
 
+  hasLinkedPr(ref: IssueRef, pr: IssueRef): boolean {
+    return !!this.db
+      .prepare(`SELECT 1 FROM linked_prs WHERE repo = ? AND issue_number = ? AND pr_repo = ? AND pr_number = ?`)
+      .get(key(ref.repo), ref.number, key(pr.repo), pr.number);
+  }
+
   /** Returns the previous state, or null if the link is new. */
   upsertLinkedPr(ref: IssueRef, pr: LinkedPr): PrState | null {
     const args = [key(ref.repo), ref.number, key(pr.repo), pr.number] as const;

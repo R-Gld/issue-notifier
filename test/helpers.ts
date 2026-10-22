@@ -62,6 +62,11 @@ export class FakeChat implements Chat {
     post.message = message;
   }
 
+  async postChannel(postId: string): Promise<string | null> {
+    const post = this.posts.find((p) => p.id === postId);
+    return post && !this.deleted.has(postId) ? post.channelId : null;
+  }
+
   /** Live root posts, optionally of one channel (`team/channel`). */
   roots(channelId?: string): Post[] {
     return this.posts.filter((p) => !p.rootId && !this.deleted.has(p.id) && (!channelId || p.channelId === channelId));

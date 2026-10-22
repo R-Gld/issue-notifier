@@ -87,9 +87,14 @@ describe("webhook endpoint", () => {
 
   it("rejects oversized and malformed payloads", async () => {
     const big = "x".repeat(6 * 1024 * 1024);
-    const res = await fetch(`${base}/webhook`, { method: "POST", body: big }).catch(() => null);
+    const res = await fetch(`${base}/webhook`, { method: "POST", body: big, headers: { "x-hub-signature-256": "sha256=x" } }).catch(
+      () => null,
+    );
     // The server may cut the connection before answering 413.
     if (res) expect(res.status).toBe(413);
+    // Without a signature the body is not even read.
+    const unsigned = await fetch(`${base}/webhook`, { method: "POST", body: big }).catch(() => null);
+    if (unsigned) expect(unsigned.status).toBe(401);
     const raw = "not json";
     const headers = { "x-github-event": "issues", "x-github-delivery": "d2", "x-hub-signature-256": await sign(SECRET, raw) };
     expect((await fetch(`${base}/webhook`, { method: "POST", body: raw, headers })).status).toBe(400);

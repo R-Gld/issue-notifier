@@ -63,8 +63,8 @@ export class GitHub implements GitHubApi {
     };
   }
 
-  private get<T>(path: string): Promise<T> {
-    return fetchJson<T>(`${this.base}${path}`, { headers: this.headers() });
+  private get<T>(path: string, init: RequestInit = {}): Promise<T> {
+    return fetchJson<T>(`${this.base}${path}`, { ...init, headers: this.headers() });
   }
 
   async getIssue(repo: string, number: number): Promise<IssueLookup> {
@@ -92,7 +92,11 @@ export class GitHub implements GitHubApi {
   private async timeline(repo: string, number: number): Promise<GhTimelineEvent[]> {
     const out: GhTimelineEvent[] = [];
     for (let page = 1; ; page++) {
-      const events = await this.get<GhTimelineEvent[]>(`/repos/${repo}/issues/${number}/timeline?per_page=100&page=${page}`);
+      // A transferred issue redirects to its new repository, possibly private: never follow it,
+      // or that repository's comments would be posted in this repository's channel.
+      const events = await this.get<GhTimelineEvent[]>(`/repos/${repo}/issues/${number}/timeline?per_page=100&page=${page}`, {
+        redirect: "manual",
+      });
       out.push(...events);
       if (events.length < 100) return out;
     }

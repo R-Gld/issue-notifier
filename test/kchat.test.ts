@@ -71,4 +71,17 @@ describe("KChat", () => {
     await expect(kchat.editPost("forbidden", "x")).rejects.toBeInstanceOf(PostMissingError);
     await expect(kchat.editPost("bad", "x")).rejects.not.toBeInstanceOf(PostMissingError);
   });
+
+  it("reads the channel of a post, or null when it is gone", async () => {
+    mockFetch(
+      on("GET", "/posts/p1", { body: { id: "p1", channel_id: "c7" } }),
+      on("GET", "/posts/gone", { status: 404 }),
+      on("GET", "/posts/hidden", { status: 403 }),
+      on("GET", "/posts/err", { status: 401 }),
+    );
+    expect(await kchat.postChannel("p1")).toBe("c7");
+    expect(await kchat.postChannel("gone")).toBeNull();
+    expect(await kchat.postChannel("hidden")).toBeNull();
+    await expect(kchat.postChannel("err")).rejects.toBeInstanceOf(HttpError);
+  });
 });

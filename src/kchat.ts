@@ -9,6 +9,8 @@ export interface Chat {
   createPost(channelId: string, message: string, rootId?: string): Promise<string>;
   /** Throws PostMissingError when the post was deleted. */
   editPost(postId: string, message: string): Promise<void>;
+  /** Channel holding a post, or null if the post is gone. */
+  postChannel(postId: string): Promise<string | null>;
 }
 
 /** Minimal kChat (Mattermost API v4) client acting as the bot account. */
@@ -46,6 +48,15 @@ export class KChat implements Chat {
     } catch (err) {
       // Mattermost answers 400/404 when root_id points to a deleted post.
       if (rootId && err instanceof HttpError && (err.status === 400 || err.status === 404)) throw new PostMissingError(rootId);
+      throw err;
+    }
+  }
+
+  async postChannel(postId: string): Promise<string | null> {
+    try {
+      return (await this.request<{ channel_id: string }>("GET", `/posts/${postId}`)).channel_id;
+    } catch (err) {
+      if (err instanceof HttpError && (err.status === 404 || err.status === 403)) return null;
       throw err;
     }
   }

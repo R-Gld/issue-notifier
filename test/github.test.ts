@@ -188,6 +188,14 @@ describe("GitHub client", () => {
     });
   });
 
+  it("never follows the redirect of a transferred issue's timeline", async () => {
+    const { calls } = mockFetch(on("GET", "/timeline", { status: 301, body: { url: `${API}/repositories/1/issues/9/timeline` } }));
+    await expect(gh.history(REPO, 9)).rejects.toMatchObject({ status: 301 });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.redirect).toBe("manual");
+    await expect(gh.linkedPrs(REPO, 9)).rejects.toMatchObject({ status: 301 });
+  });
+
   describe("duplicateOf", () => {
     it("needs a token and makes no request without one", async () => {
       const { calls } = mockFetch();

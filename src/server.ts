@@ -31,6 +31,9 @@ export function createApp(deps: { secret: string; repos: readonly string[]; noti
     if (req.method === "GET" && path === "/health") return send(200, "ok");
     if (req.method !== "POST" || path !== "/webhook") return send(404, "not found");
 
+    // Cheap rejection before reading up to 5 MB of an unsigned body.
+    if (typeof req.headers["x-hub-signature-256"] !== "string") return send(401, "invalid signature");
+
     let body: string;
     try {
       body = await readBody(req);

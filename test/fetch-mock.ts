@@ -5,6 +5,7 @@ export interface Call {
   url: string;
   headers: Record<string, string>;
   body: unknown;
+  redirect?: RequestRedirect;
 }
 
 type Reply = { status?: number; body?: unknown } | Error;
@@ -22,6 +23,7 @@ export function mockFetch(...routes: Route[]) {
       url: String(input),
       headers: Object.fromEntries(new Headers(init.headers).entries()),
       body: typeof init.body === "string" ? JSON.parse(init.body) : undefined,
+      redirect: init.redirect,
     };
     calls.push(call);
     for (const route of routes) {

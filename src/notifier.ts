@@ -59,8 +59,9 @@ interface ApplyOptions {
 
 
 /**
- * Most issue references followed per PR. Anyone can open a PR on a public repository: without a
- * cap, a body listing `#1 … #2000` would create (and replay the history of) 2000 threads.
+ * Most issues a PR can be linked to, all paths together (body, edits, reconcile). Anyone can open
+ * a PR on a public repository: without a cap, a body listing `#1 … #2000` would create (and replay
+ * the history of) 2000 threads, and its merge would reply in each of them.
  */
 export const MAX_PR_REFS = 10;
 
@@ -237,11 +238,23 @@ export class Notifier {
     reply: (prev: LinkedPr["state"] | null, issueRepo: RepoConfig) => ApplyOptions["reply"],
   ): Promise<void> {
     const repo = findRepo(this.config, ref.repo);
-    if (!repo) return;
+    if (!repo || !this.admitLink({ repo: repo.repo, number: ref.number }, pr)) return;
     const lookup = await this.github.getIssue(repo.repo, ref.number);
     if (lookup.kind !== "issue") return;
     const prev = this.store.upsertLinkedPr({ repo: repo.repo, number: ref.number }, pr);
     await this.apply(repo, lookup.issue, { historyBefore, reply: reply(prev, repo) });
+  }
+
+  /** Whether `pr` may be linked to `ref`: already linked, or still within the PR's budget. */
+  private admitLink(ref: IssueRef, pr: LinkedPr): boolean {
+    if (this.store.hasLinkedPr(ref, pr)) return true;
+    if (this.store.issuesLinkedTo(pr).length < MAX_PR_REFS) return true;
+    log.warn("PR already linked to the maximum number of issues, link ignored", {
+      pr: `${pr.repo}#${pr.number}`,
+      issue: `${ref.repo}#${ref.number}`,
+      max: MAX_PR_REFS,
+    });
+    return false;
   }
 
   private async findDuplicate(repo: RepoConfig, issueNumber: number): Promise<number | null> {
@@ -259,9 +272,12 @@ export class Notifier {
     const at = { repo: repo.repo, issue: issue.number };
     const channelId = await this.chat.resolveChannel(repo.kchatTeam, repo.channel);
     let thread = this.store.getThread(ref);
-    // The repository moved to another channel: start a new thread there.
-    if (thread?.channelId && thread.channelId !== channelId) {
-      log.info("channel changed, thread will be recreated", at);
+    // Threads migrated from the single-repository era do not know their channel: ask the chat
+    // rather than assume, or a channel change would keep updating the old channel.
+    const threadChannel = thread && (thread.channelId ?? (await this.chat.postChannel(thread.postId)));
+    // The repository moved to another channel (or the root is gone): start a new thread here.
+    if (thread && threadChannel !== channelId) {
+      log.info("thread is not in the repository's channel, it will be recreated", { ...at, threadChannel, channelId });
       thread = null;
     }
     // GitHub does not guarantee delivery order: an older payload must not overwrite a newer state.
@@ -300,7 +316,9 @@ export class Notifier {
     }
     const row = { repo: repo.repo, issueNumber: issue.number, channelId, postId, state: issue.state, duplicateOf, gone, rootMessage, snapshot: issue, ...history };
     this.store.saveThread(row);
-    if (!row.historyDone) await this.replayHistory(repo, issue, channelId, postId, row.historyCursor, opts.historyBefore);
+    // A transferred issue's API redirects to its new (possibly private) repository: never replay
+    // the history of an issue that left, it could leak the destination's comments here.
+    if (!row.historyDone && !gone) await this.replayHistory(repo, issue, channelId, postId, row.historyCursor, opts.historyBefore);
 
     const reply = opts.reply;
     if (!reply || !repo.events[reply.event]) return;
@@ -311,7 +329,7 @@ export class Notifier {
       const fresh = await this.chat.createPost(channelId, rootMessage);
       this.store.saveThread({ ...row, postId: fresh, historyCursor: 0, historyDone: false });
       log.warn("root post was missing, thread recreated", { ...at, postId: fresh });
-      await this.replayHistory(repo, issue, channelId, fresh, 0, opts.historyBefore);
+      if (!gone) await this.replayHistory(repo, issue, channelId, fresh, 0, opts.historyBefore);
       await this.chat.createPost(channelId, reply.message, fresh);
     }
     log.info("reply posted", { ...at, event: reply.event });
@@ -373,7 +391,8 @@ export class Notifier {
         return;
       }
       const issue = lookup.issue;
-      for (const pr of await this.github.linkedPrs(repo.repo, number)) this.store.upsertLinkedPr(ref, pr);
+      for (const pr of await this.github.linkedPrs(repo.repo, number))
+        if (this.admitLink(ref, pr)) this.store.upsertLinkedPr(ref, pr);
       const thread = this.store.getThread(ref);
       const duplicateOf =
         issue.stateReason === "duplicate" && !thread?.duplicateOf ? await this.findDuplicate(repo, number) : undefined;

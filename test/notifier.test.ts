@@ -644,3 +644,66 @@ describe("languages", () => {
     expect(chat.replies(fr!.id)).toEqual([expect.stringMatching(/^🔀 PR liée : #5 /)]);
   });
 });
+
+describe("security regressions, second audit", () => {
+  const snapshot1201 = () => toSnapshot(issue1201);
+
+  it("checks the real channel of migrated threads before updating them", async () => {
+    // A migrated thread: root posted in the old channel, channel unknown in the database.
+    const old = await chat.createPost("acme/old-channel", "old root");
+    store.saveThread({
+      repo: REPO, issueNumber: 1201, channelId: null, postId: old, state: "open", duplicateOf: null, gone: null,
+      rootMessage: "old root", snapshot: snapshot1201(), historyCursor: 0, historyDone: true,
+    });
+    await issues("edited", { ...issue1201, title: "Secret new title", updated_at: "2026-10-22T10:00:00Z" });
+    expect(chat.posts.find((p) => p.id === old)!.message).toBe("old root");
+    const [fresh] = chat.roots("acme/github-issues");
+    expect(fresh!.message).toContain("Secret new title");
+    expect(store.getThread({ repo: REPO, number: 1201 })).toMatchObject({ postId: fresh!.id, channelId: "acme/github-issues" });
+  });
+
+  it("keeps migrated threads that are in the right channel", async () => {
+    const root = await chat.createPost("acme/github-issues", "old root");
+    store.saveThread({
+      repo: REPO, issueNumber: 1201, channelId: null, postId: root, state: "open", duplicateOf: null, gone: null,
+      rootMessage: "old root", snapshot: snapshot1201(), historyCursor: 0, historyDone: true,
+    });
+    await issues("edited", { ...issue1201, title: "New title", updated_at: "2026-10-22T10:00:00Z" });
+    expect(chat.roots()).toHaveLength(1);
+    expect(chat.roots()[0]!.message).toContain("New title");
+    expect(store.getThread({ repo: REPO, number: 1201 })!.channelId).toBe("acme/github-issues");
+  });
+
+  it("caps the issues a PR is linked to across edits, reconcile and closing", async () => {
+    vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    for (let n = 1; n <= 30; n++) github.addIssue(toSnapshot({ ...issue1201, number: n, html_url: `https://github.com/${REPO}/issues/${n}` }));
+    // Ten references, then ten more by editing, then the PR shows up in the timeline of ten others.
+    await pullRequest("opened", { body: Array.from({ length: 10 }, (_, i) => `#${i + 1}`).join(" ") });
+    await pullRequest("edited", { body: Array.from({ length: 10 }, (_, i) => `#${i + 11}`).join(" ") });
+    for (let n = 21; n <= 30; n++) github.prs.set(n, [{ repo: REPO, number: 1210, title: "fix", url: "u", state: "open" }]);
+    await notifier.reconcile();
+    expect(store.issuesLinkedTo({ repo: REPO, number: 1210 })).toHaveLength(MAX_PR_REFS);
+
+    let reads = 0;
+    const getIssue = github.getIssue.bind(github);
+    github.getIssue = async (repo, n) => (reads++, getIssue(repo, n));
+    await pullRequest("closed", { merged: true, body: "" });
+    expect(reads).toBe(MAX_PR_REFS);
+    expect(chat.posts.filter((p) => p.message.startsWith("🟣 PR #1210 mergée"))).toHaveLength(MAX_PR_REFS);
+  });
+
+  it("never replays history into the thread of an issue that left", async () => {
+    // A thread whose history replay never finished.
+    github.histories.set(1201, [{ at: "2026-10-17T07:00:00Z", actor: "x", kind: "commented", body: "private destination comment", url: "u" }]);
+    const root = await chat.createPost("acme/github-issues", "root");
+    store.saveThread({
+      repo: REPO, issueNumber: 1201, channelId: "acme/github-issues", postId: root, state: "open", duplicateOf: null, gone: null,
+      rootMessage: "root", snapshot: snapshot1201(), historyCursor: 0, historyDone: false,
+    });
+    github.issues.set(1201, { kind: "transferred" });
+    await notifier.reconcile();
+    await issues("transferred", issue1201, { changes: { new_repository: { full_name: "acme/private" } } });
+    expect(chat.posts.map((p) => p.message).join("\n")).not.toContain("private destination comment");
+    expect(chat.roots()[0]!.message).toContain("➡️ Transférée");
+  });
+});
