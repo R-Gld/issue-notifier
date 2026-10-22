@@ -100,6 +100,7 @@ A repository posts into exactly one channel. Data written before multi-repositor
 nvm use          # Node 22
 npm install
 npm test         # vitest
+npm run test:coverage   # fails below the coverage thresholds
 npm run typecheck
 npm run dev      # needs a config.yml and the variables of .env
 ```

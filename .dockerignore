@@ -6,3 +6,5 @@ data
 test
 deploy
 *.md
+coverage
+vitest.config.ts

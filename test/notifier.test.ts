@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toSnapshot, type GhIssue } from "../src/domain.ts";
 import { Notifier } from "../src/notifier.ts";
 import { Store } from "../src/store.ts";
@@ -42,6 +42,7 @@ const pullRequest = (action: string, extra: Record<string, unknown> = {}) =>
   });
 
 beforeEach(() => setup());
+afterEach(() => vi.restoreAllMocks());
 
 describe("issue events", () => {
   it("creates a thread on open without replying", async () => {
@@ -98,8 +99,15 @@ describe("issue events", () => {
   });
 
   it("strikes the thread when the issue is transferred", async () => {
+    await issues("opened", issue1201);
     await issues("transferred", issue1201, { changes: { new_repository: { full_name: "acme/other" } } });
     expect(chat.roots()[0]!.message).toMatch(/~~\[#1201\][\s\S]*➡️ Transférée/);
+  });
+
+  it("does not open a thread for an issue that leaves before it ever had one", async () => {
+    await issues("transferred", issue1201, { changes: { new_repository: { full_name: "acme/other" } } });
+    await issues("deleted", issue1201);
+    expect(chat.posts).toEqual([]);
   });
 
   it("recreates the thread when its root post was deleted", async () => {
@@ -345,5 +353,235 @@ describe("several repositories", () => {
     await comment(issue1201, "outside-user", "shown");
     expect(chat.replies(chat.roots("acme/gadgets")[0]!.id)).toEqual([]);
     expect(chat.replies(chat.roots("acme/widgets")[0]!.id)).toEqual([expect.stringContaining("shown")]);
+  });
+});
+
+describe("issue event coverage", () => {
+  const enabled = testConfig({
+    events: { renamed: true, labeled: true, unlabeled: true, typed: true, milestoned: true, transferred: true, deleted: true },
+  });
+
+  it("replies to every enabled triage event with the right wording", async () => {
+    setup(enabled);
+    await issues("opened", issue1201);
+    await issues("unassigned", { ...issue1201, assignees: [] }, { assignee: user("alice-dev") });
+    await issues("assigned", issue1201, { assignee: user("alice-dev") });
+    await issues("unlabeled", { ...issue1201, labels: [] }, { label: { name: "bug" } });
+    await issues("typed", { ...issue1201, type: { name: "Feature" } });
+    await issues("untyped", { ...issue1201, type: null });
+    await issues("milestoned", { ...issue1201, milestone: { title: "v2.0" } });
+    await issues("demilestoned", { ...issue1201, milestone: null });
+    await issues("closed", { ...issue1201, state: "closed", state_reason: "not_planned" });
+    await issues("reopened", { ...issue1201, state: "open", state_reason: "reopened" });
+    await issues("deleted", issue1201);
+    const root = chat.roots()[0]!;
+    expect(chat.replies(root.id)).toEqual([
+      "👤 **alice-dev** retiré de l'issue par **rob-dev**",
+      "👤 Assignée à @alice.dev par **rob-dev**",
+      "🏷️ Label `bug` retiré par **rob-dev**",
+      "🏷️ Type défini sur **Feature** par **rob-dev**",
+      "🏷️ Type retiré par **rob-dev**",
+      "🎯 Milestone **v2.0** par **rob-dev**",
+      "🎯 Milestone retirée par **rob-dev**",
+      "🚫 Fermée (not planned) par **rob-dev**",
+      "🔓 Rouverte par **rob-dev**",
+      "🗑️ Supprimée par **rob-dev**",
+    ]);
+    expect(root.message).toMatch(/~~\[#1201\][\s\S]*🗑️ Supprimée/);
+  });
+
+  it("only updates the root for triage events disabled by default", async () => {
+    await issues("opened", issue1201);
+    await issues("typed", { ...issue1201, type: { name: "Bug" } });
+    await issues("milestoned", { ...issue1201, type: { name: "Bug" }, milestone: { title: "v2.0" } });
+    await issues("edited", { ...issue1201, type: { name: "Bug" }, milestone: { title: "v2.0" }, title: "Renamed" }, {
+      changes: { title: { from: issue1201.title } },
+    });
+    const root = chat.roots()[0]!;
+    expect(root.message).toContain("Renamed");
+    expect(root.message).toContain("Type : Bug");
+    expect(root.message).toContain("Milestone : v2.0");
+    expect(chat.replies(root.id)).toEqual([]);
+  });
+
+  it("does not reply when only the body was edited", async () => {
+    setup(enabled);
+    await issues("opened", issue1201);
+    await issues("edited", issue1201, { changes: { body: { from: "old" } } });
+    expect(chat.posts).toHaveLength(1);
+  });
+
+  it("refreshes the root without replying when the assignee is missing from the payload", async () => {
+    await issues("opened", issue1201);
+    await issues("assigned", { ...issue1201, assignees: [{ login: "rob-dev" }] });
+    expect(chat.roots()[0]!.message).toContain("Assignee : @rob.dev");
+    expect(chat.replies(chat.roots()[0]!.id)).toEqual([]);
+  });
+
+  it("keeps an existing thread in sync on other actions, without creating one", async () => {
+    await issues("locked", issue1201);
+    expect(chat.posts).toEqual([]);
+    await issues("opened", issue1201);
+    await issues("pinned", { ...issue1201, title: "Pinned title" });
+    expect(chat.roots()[0]!.message).toContain("Pinned title");
+    expect(chat.posts).toHaveLength(1);
+  });
+
+  it("ignores comment edits and deletions, and unknown event types", async () => {
+    for (const action of ["edited", "deleted"])
+      await notifier.handleEvent("issue_comment", {
+        action,
+        issue: issue1201,
+        comment: { body: "x", html_url: "c", user: user("outside-user"), created_at: "2026-10-22T00:00:00Z" },
+        sender: user("outside-user"),
+        repository,
+      });
+    await notifier.handleEvent("star", { action: "created", repository });
+    expect(chat.posts).toEqual([]);
+  });
+
+  it("closes as duplicate without a target when the lookup fails", async () => {
+    vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    github.duplicateOf = async () => {
+      throw new Error("graphql down");
+    };
+    await issues("closed", { ...issue1201, state: "closed", state_reason: "duplicate" });
+    expect(chat.roots()[0]!.message).toContain("🔁 Fermée (doublon)");
+    expect(chat.replies(chat.roots()[0]!.id)).toEqual([expect.stringMatching(/^🔁 Fermée comme doublon par/)]);
+  });
+
+  it("recreates the thread when the root post vanished before an edit", async () => {
+    github.histories.set(1201, [{ at: "2026-10-17T07:00:00Z", actor: "outside-user", kind: "commented", body: "logs", url: "u1" }]);
+    await issues("opened", issue1201);
+    chat.deleted.add(chat.roots()[0]!.id);
+    const labeled = { ...issue1201, labels: [{ name: "bug" }, { name: "linux" }], updated_at: "2026-10-22T09:00:00Z" };
+    await issues("labeled", labeled, { label: { name: "linux" } });
+    const [fresh] = chat.roots();
+    expect(fresh!.message).toContain("`linux`");
+    expect(chat.replies(fresh!.id)).toEqual([expect.stringContaining("logs")]);
+  });
+
+  it("propagates chat failures so the event can be retried", async () => {
+    vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    chat.failAt = 0;
+    expect(await notifier.enqueue("e", () => issues("opened", issue1201))).toBe(false);
+    expect(await notifier.enqueue("e", () => issues("opened", issue1201))).toBe(true);
+    expect(chat.roots()).toHaveLength(1);
+  });
+
+  it("lets other chat errors on edits and replies fail the event instead of recreating threads", async () => {
+    vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    await issues("opened", issue1201);
+    chat.editPost = async () => {
+      throw new Error("kChat 500");
+    };
+    const labeled = { ...issue1201, labels: [{ name: "linux" }] };
+    expect(await notifier.enqueue("e", () => issues("labeled", labeled, { label: { name: "linux" } }))).toBe(false);
+    const create = chat.createPost.bind(chat);
+    chat.createPost = async (c, m, root) => {
+      if (root) throw new Error("kChat 500");
+      return create(c, m, root);
+    };
+    expect(await notifier.enqueue("e", () => comment(issue1201, "outside-user", "hi"))).toBe(false);
+    expect(chat.roots()).toHaveLength(1);
+  });
+
+  it("keeps processing the queue after a failed task", async () => {
+    vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const order: string[] = [];
+    const results = await Promise.all([
+      notifier.enqueue("a", async () => {
+        order.push("a");
+        throw new Error("boom");
+      }),
+      notifier.enqueue("b", async () => {
+        order.push("b");
+      }),
+    ]);
+    expect(results).toEqual([false, true]);
+    expect(order).toEqual(["a", "b"]);
+  });
+});
+
+describe("pull request event coverage", () => {
+  it("ignores bots, unsupported actions and PRs without references", async () => {
+    await notifier.handleEvent("pull_request", {
+      action: "opened",
+      pull_request: { ...pr1210, state: "open", merged: false },
+      sender: user("renovate[bot]", "Bot"),
+      repository,
+    });
+    await pullRequest("synchronize");
+    await pullRequest("labeled");
+    await pullRequest("opened", { title: "chore: bump deps", body: null });
+    expect(chat.posts).toEqual([]);
+  });
+
+  it("links on reopened and ready_for_review too, but only once", async () => {
+    await pullRequest("ready_for_review");
+    await pullRequest("reopened");
+    expect(chat.replies(chat.roots()[0]!.id)).toEqual([expect.stringMatching(/^🔀 PR liée/)]);
+  });
+
+  it("does not repeat a merge already known, and reports a merge it never saw opened", async () => {
+    await pullRequest("closed", { merged: true });
+    await pullRequest("closed", { merged: true });
+    const replies = chat.replies(chat.roots()[0]!.id);
+    expect(replies).toEqual([expect.stringMatching(/^🟣 PR #1210 mergée/)]);
+  });
+
+  it("links a later reference added by editing the PR", async () => {
+    await pullRequest("opened", { body: "WIP" });
+    expect(chat.posts).toEqual([]);
+    await pullRequest("edited", { body: "Fixes #1201" });
+    expect(chat.roots()[0]!.message).toContain("#1201");
+  });
+
+  it("never turns a PR title into a link or a mention", async () => {
+    await pullRequest("opened", { title: "Fix crash, see https://example.com/x and @channel" });
+    const [reply] = chat.replies(chat.roots()[0]!.id);
+    expect(reply).not.toMatch(/(?<!`)https?:\/\//);
+    expect(reply).toContain("`https://example.com/x`");
+    expect(reply).not.toMatch(/@channel/);
+  });
+});
+
+describe("reconcile coverage", () => {
+  it("keeps going when one repository or one issue fails", async () => {
+    vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    setup(testConfig({ repos: [{ repo: "acme/broken", channel: "x" }, { repo: REPO, channel: "github-issues" }] }));
+    const list = github.listOpenIssues.bind(github);
+    github.listOpenIssues = async (repo) => {
+      if (repo === "acme/broken") throw new Error("403");
+      return list(repo);
+    };
+    github.linkedPrs = async (_repo, n) => {
+      if (n === 1201) throw new Error("timeline down");
+      return [];
+    };
+    await notifier.reconcile();
+    expect(chat.roots().map((p) => p.message)).toEqual([expect.stringContaining("#1202")]);
+  });
+
+  it("marks threads of transferred issues and skips numbers that became PRs", async () => {
+    await notifier.reconcile();
+    github.issues.set(1201, { kind: "transferred" });
+    github.issues.set(1202, { kind: "pull_request" });
+    await notifier.reconcile();
+    const [r1201, r1202] = chat.roots();
+    expect(r1201!.message).toContain("➡️ Transférée");
+    expect(r1202!.message).toContain("🟢 Ouverte");
+  });
+
+  it("resolves a duplicate target once and remembers it", async () => {
+    let lookups = 0;
+    github.duplicateOf = async () => (++lookups, 1150);
+    github.addIssue(toSnapshot({ ...issue1201, state: "closed", state_reason: "duplicate" }));
+    await notifier.handleEvent("issues", { action: "labeled", issue: { ...issue1201, state: "closed", state_reason: "duplicate" }, label: { name: "x" }, sender: user("rob-dev"), repository });
+    store.saveThread({ ...store.getThread({ repo: REPO, number: 1201 })!, state: "open" });
+    await notifier.reconcile();
+    await notifier.reconcile();
+    expect(chat.roots()[0]!.message).toContain("🔁 Doublon de #1150");
+    expect(lookups).toBe(1);
   });
 });
