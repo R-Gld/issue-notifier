@@ -1,16 +1,25 @@
 # Issue notifier configuration. Secrets live in .env, not here.
 # Apply changes with: docker compose restart
 
-github:
-  repo: my-org/my-repo
-
 kchat:
   # Base URL of the kChat / Mattermost API host, without /api/v4.
   # On kChat this is the team's own host, which may differ from the web UI URL.
   url: https://chat.example.com
-  # Team and channel names as they appear in the channel URL.
+  # Default team of the channels, as it appears in channel URLs.
   team: my-team
-  channel: github-issues
+
+# Repositories to follow, each posting into one channel. Several repositories may share
+# a channel: thread titles then name the repository (gadgets#12).
+repos:
+  - repo: my-org/my-repo
+    channel: github-issues
+  # - repo: my-org/other-repo
+  #   channel: github-issues        # shared with my-repo
+  # - repo: my-org/hardware
+  #   channel: hardware-issues
+  #   kchatTeam: other-team         # channel of another kChat team
+  #   events:                       # overrides the defaults below for this repository
+  #     labeled: true
 
 # GitHub login → kChat username (without @).
 # Only users listed here can be @mentioned (when they get assigned); others show in bold.
@@ -19,6 +28,7 @@ team:
   jane-doe-gh: jane.doe
 
 # Which events post a reply in the issue thread (true) or only update the root post (false).
+# Defaults for every repository; each one can override them under `events`.
 # The root post (status, type, labels, assignees, linked PRs) is always kept up to date.
 events:
   assigned: true
