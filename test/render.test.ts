@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { toSnapshot } from "../src/domain.ts";
 import { Renderer } from "../src/render.ts";
-import { fixture } from "./helpers.ts";
+import { fixture, OTHER_REPO, REPO } from "./helpers.ts";
 
 const render = new Renderer({ team: new Map([["rob-dev", "rob.dev"], ["alice-dev", "alice.dev"]]), excerptLength: 300 });
 // The real #1201 has a `bug` label but no issue type yet.
@@ -10,7 +10,7 @@ const closed = toSnapshot(fixture("issue-1202"));
 
 describe("root post", () => {
   it("renders an open issue with a mentioned assignee", () => {
-    expect(render.root({ issue: open, prs: [], duplicateOf: null, gone: null })).toBe(
+    expect(render.root({ repo: REPO, showRepo: false,  issue: open, prs: [], duplicateOf: null, gone: null })).toBe(
       [
         "---",
         "",
@@ -22,23 +22,34 @@ describe("root post", () => {
   });
 
   it("shows the close reason and linked PRs", () => {
-    const pr = { number: 1210, title: "fix", url: "https://github.com/acme/widgets/pull/1210", state: "merged" as const };
-    const msg = render.root({ issue: closed, prs: [pr], duplicateOf: null, gone: null });
+    const pr = { repo: REPO, number: 1210, title: "fix", url: "https://github.com/acme/widgets/pull/1210", state: "merged" as const };
+    const msg = render.root({ repo: REPO, showRepo: false,  issue: closed, prs: [pr], duplicateOf: null, gone: null });
     expect(msg).toContain("Statut : ✅ Fermée (completed)");
     expect(msg).toContain("PRs liées : [#1210](https://github.com/acme/widgets/pull/1210) (🟣 mergée)");
   });
 
   it("covers not planned, duplicate, unassigned and gone issues", () => {
     const base = { prs: [], gone: null };
-    expect(render.root({ ...base, issue: { ...closed, stateReason: "not_planned" }, duplicateOf: null })).toContain("🚫 Fermée (not planned)");
-    expect(render.root({ ...base, issue: { ...closed, stateReason: "duplicate" }, duplicateOf: 1150 })).toContain("🔁 Doublon de #1150");
-    expect(render.root({ ...base, issue: { ...open, assignees: [], type: null }, duplicateOf: null })).toMatch(/^---\n\n#### 📝 [\s\S]*Assignee : —/);
-    expect(render.root({ prs: [], issue: open, duplicateOf: null, gone: "transferred" })).toMatch(/^---\n\n#### 🐛 ~~\[#1201\]\(https:\/\/github\.com\/acme\/widgets\/issues\/1201\) ·[\s\S]*➡️ Transférée/);
+    expect(render.root({ repo: REPO, showRepo: false,  ...base, issue: { ...closed, stateReason: "not_planned" }, duplicateOf: null })).toContain("🚫 Fermée (not planned)");
+    expect(render.root({ repo: REPO, showRepo: false,  ...base, issue: { ...closed, stateReason: "duplicate" }, duplicateOf: 1150 })).toContain("🔁 Doublon de #1150");
+    expect(render.root({ repo: REPO, showRepo: false,  ...base, issue: { ...open, assignees: [], type: null }, duplicateOf: null })).toMatch(/^---\n\n#### 📝 [\s\S]*Assignee : —/);
+    expect(render.root({ repo: REPO, showRepo: false,  prs: [], issue: open, duplicateOf: null, gone: "transferred" })).toMatch(/^---\n\n#### 🐛 ~~\[#1201\]\(https:\/\/github\.com\/acme\/widgets\/issues\/1201\) ·[\s\S]*➡️ Transférée/);
   });
 
   it("does not mention unmapped assignees", () => {
-    const msg = render.root({ issue: { ...open, assignees: ["unmapped-user"] }, prs: [], duplicateOf: null, gone: null });
+    const msg = render.root({ repo: REPO, showRepo: false,  issue: { ...open, assignees: ["unmapped-user"] }, prs: [], duplicateOf: null, gone: null });
     expect(msg).toContain("Assignee : **unmapped-user**");
+  });
+});
+
+describe("several repositories", () => {
+  it("names the repository in a shared channel and for PRs of other repositories", () => {
+    const pr = { repo: OTHER_REPO, number: 7, title: "fix", url: "https://github.com/acme/gadgets/pull/7", state: "open" as const };
+    const msg = render.root({ repo: REPO, showRepo: true, issue: open, prs: [pr], duplicateOf: null, gone: null });
+    expect(msg).toContain("#### 🐛 [widgets#1201](https://github.com/acme/widgets/issues/1201) · ");
+    expect(msg).toContain("PRs liées : [gadgets#7](https://github.com/acme/gadgets/pull/7) (🟢 ouverte)");
+    expect(render.prMerged(pr, REPO, "rob-dev")).toBe("🟣 PR gadgets#7 mergée par **rob-dev**");
+    expect(render.prMerged(pr, OTHER_REPO, "rob-dev")).toBe("🟣 PR #7 mergée par **rob-dev**");
   });
 });
 
@@ -78,7 +89,7 @@ describe("mention safety", () => {
     const msg = render.commented("rob-dev", "Hi @outside-user, cc @channel @all and mail me at a@b.c");
     expect(msg).not.toMatch(/@[\w.-]/);
     expect(msg).toContain("@⁠outside-user");
-    const root = render.root({ issue: { ...open, title: "Ping @here", labels: ["@x"] }, prs: [], duplicateOf: null, gone: null });
+    const root = render.root({ repo: REPO, showRepo: false,  issue: { ...open, title: "Ping @here", labels: ["@x"] }, prs: [], duplicateOf: null, gone: null });
     expect(root).not.toMatch(/@(here|x)/);
     // Real mentions are still produced for mapped assignees.
     expect(root).toContain("@alice.dev");
@@ -87,16 +98,16 @@ describe("mention safety", () => {
 
 describe("link previews", () => {
   it("keeps replies free of links so kChat shows no preview", () => {
-    const pr = { number: 1210, title: "fix", url: "https://github.com/x/pull/1210", state: "merged" as const };
+    const pr = { repo: REPO, number: 1210, title: "fix", url: "https://github.com/x/pull/1210", state: "merged" as const };
     const replies = [
       render.commented("outside-user", "see https://example.com"),
       render.assigned("alice-dev", "rob-dev"),
-      render.prLinked(pr, "rob-dev"),
-      render.prMerged(pr, "rob-dev"),
+      render.prLinked(pr, REPO, "rob-dev"),
+      render.prMerged(pr, REPO, "rob-dev"),
       render.closed(closed, "rob-dev", null),
     ];
     for (const r of replies.slice(1)) expect(r).not.toMatch(/https?:\/\//);
-    expect(render.prLinked(pr, "rob-dev")).toBe("🔀 PR liée : #1210 fix par **rob-dev**");
+    expect(render.prLinked(pr, REPO, "rob-dev")).toBe("🔀 PR liée : #1210 fix par **rob-dev**");
   });
 });
 

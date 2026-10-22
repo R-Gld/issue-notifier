@@ -8,19 +8,35 @@ import { createApp } from "./server.ts";
 import { Store } from "./store.ts";
 
 const config = loadConfig();
-const store = new Store(config.dbPath);
+// Rows from the single-repository era belong to the first configured repository.
+const store = new Store(config.dbPath, config.repos[0]!.repo);
 const kchat = new KChat(config.kchat);
-const github = new GitHub(config.repo, config.github.token);
+const github = new GitHub(
+  config.repos.map((r) => r.repo),
+  config.github.token,
+);
 const notifier = new Notifier(config, store, kchat, github);
 
 // Fail fast on a wrong team/channel or token.
-const channelId = await kchat.resolveChannel().catch((err: unknown) => {
-  log.error("cannot resolve kChat channel: check kchat.url/team/channel and KCHAT_TOKEN", { err });
-  process.exit(1);
-});
-log.info("kChat channel resolved", { team: config.kchat.team, channel: config.kchat.channel, channelId });
+for (const { repo, kchatTeam, channel } of config.repos) {
+  const channelId = await kchat.resolveChannel(kchatTeam, channel).catch((err: unknown) => {
+    log.error("cannot resolve kChat channel: check kchat.url, the repository's team/channel and KCHAT_TOKEN", {
+      repo,
+      team: kchatTeam,
+      channel,
+      err,
+    });
+    process.exit(1);
+  });
+  log.info("kChat channel resolved", { repo, team: kchatTeam, channel, channelId });
+}
 
-const server = createApp({ secret: config.github.webhookSecret, repo: config.repo, notifier, store });
+const server = createApp({
+  secret: config.github.webhookSecret,
+  repos: config.repos.map((r) => r.repo),
+  notifier,
+  store,
+});
 server.listen(config.port, config.host, () => log.info("listening", { host: config.host, port: config.port }));
 
 void notifier.enqueue("startup reconcile", () => notifier.reconcile());

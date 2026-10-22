@@ -16,10 +16,18 @@ export interface IssueSnapshot {
 export type PrState = "open" | "merged" | "closed";
 
 export interface LinkedPr {
+  /** `owner/name` of the PR, which may differ from the issue's. */
+  repo: string;
   number: number;
   title: string;
   url: string;
   state: PrState;
+}
+
+/** An issue of a configured repository. */
+export interface IssueRef {
+  repo: string;
+  number: number;
 }
 
 /** A past comment or event of an issue, replayed into a new thread. */

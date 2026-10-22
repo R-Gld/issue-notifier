@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { toSnapshot, type GhIssue } from "../src/domain.ts";
 import { Notifier } from "../src/notifier.ts";
 import { Store } from "../src/store.ts";
-import { FakeChat, FakeGitHub, fixture, REPO, testConfig, user } from "./helpers.ts";
+import { FakeChat, FakeGitHub, fixture, OTHER_REPO, REPO, testConfig, user } from "./helpers.ts";
 
 const repository = { full_name: REPO };
 const issue1201 = fixture("issue-1201");
@@ -151,7 +151,7 @@ describe("pull request events", () => {
 
 describe("reconcile", () => {
   it("bootstraps threads for open issues, oldest first, and is idempotent", async () => {
-    github.prs.set(1202, [{ number: 1210, title: "fix", url: "u", state: "open" }]);
+    github.prs.set(1202, [{ repo: REPO, number: 1210, title: "fix", url: "u", state: "open" }]);
     await notifier.reconcile();
     expect(chat.roots().map((p) => p.message.split("\n")[2])).toEqual([
       expect.stringContaining("#1201"),
@@ -224,5 +224,126 @@ describe("history replay", () => {
     const replies = chat.replies(chat.roots()[0]!.id);
     expect(replies).toHaveLength(4);
     expect(replies.filter((m) => m.includes("Any news?"))).toHaveLength(1);
+  });
+});
+
+describe("several repositories", () => {
+  const gadget = (n: number, extra: Partial<GhIssue> = {}): GhIssue => ({
+    ...issue1201,
+    number: n,
+    title: `Gadget ${n}`,
+    html_url: `https://github.com/${OTHER_REPO}/issues/${n}`,
+    ...extra,
+  });
+  const gadgets = { full_name: OTHER_REPO };
+
+  function setupRepos(repos: Array<Record<string, unknown>>) {
+    setup(testConfig({ repos }));
+    github.addIssue(toSnapshot(gadget(1201)), OTHER_REPO);
+  }
+
+  it("names the repository in titles of a shared channel", async () => {
+    setupRepos([
+      { repo: REPO, channel: "issues" },
+      { repo: OTHER_REPO, channel: "issues" },
+    ]);
+    await issues("opened", issue1201);
+    await notifier.handleEvent("issues", { action: "opened", issue: gadget(1201), sender: user("rob-dev"), repository: gadgets });
+    const titles = chat.roots("acme/issues").map((p) => p.message.split("\n")[2]);
+    expect(titles).toEqual([expect.stringContaining("[widgets#1201]"), expect.stringContaining("[gadgets#1201]")]);
+  });
+
+  it("routes each repository to its own channel and keeps same-numbered issues apart", async () => {
+    setupRepos([
+      { repo: REPO, channel: "widgets" },
+      { repo: OTHER_REPO, channel: "gadgets" },
+    ]);
+    await notifier.reconcile();
+    expect(chat.roots("acme/widgets").map((p) => p.message.split("\n")[2])).toEqual([
+      expect.stringContaining("[#1201]"),
+      expect.stringContaining("[#1202]"),
+    ]);
+    expect(chat.roots("acme/gadgets")).toEqual([expect.objectContaining({ message: expect.stringContaining("Gadget 1201") })]);
+
+    await comment(issue1201, "outside-user", "widgets comment");
+    const [widgetsRoot] = chat.roots("acme/widgets");
+    expect(chat.replies(widgetsRoot!.id)).toEqual([expect.stringContaining("widgets comment")]);
+    expect(chat.replies(chat.roots("acme/gadgets")[0]!.id)).toEqual([]);
+  });
+
+  it("ignores events of repositories that are not configured", async () => {
+    await notifier.handleEvent("issues", { action: "opened", issue: issue1201, sender: user("rob-dev"), repository: { full_name: "acme/unknown" } });
+    expect(chat.posts).toEqual([]);
+  });
+
+  it("links a PR of another configured repository and follows its merge", async () => {
+    setupRepos([
+      { repo: REPO, channel: "widgets" },
+      { repo: OTHER_REPO, channel: "gadgets" },
+    ]);
+    const pr = { ...pr1210, number: 77, html_url: `https://github.com/${OTHER_REPO}/pull/77`, body: `Fixes ${REPO}#1202 and #1201` };
+    const send = (action: string, extra: Record<string, unknown> = {}) =>
+      notifier.handleEvent("pull_request", {
+        action,
+        pull_request: { ...pr, state: action === "closed" ? "closed" : "open", merged: false, ...extra },
+        sender: user("rob-dev"),
+        repository: gadgets,
+      });
+
+    await send("opened");
+    const [widgetsRoot] = chat.roots("acme/widgets");
+    expect(widgetsRoot!.message).toContain("PRs liées : [gadgets#77](https://github.com/acme/gadgets/pull/77) (🟢 ouverte)");
+    expect(chat.replies(widgetsRoot!.id)).toEqual([expect.stringMatching(/^🔀 PR liée : gadgets#77 /)]);
+    // The bare #1201 refers to the PR's own repository.
+    const [gadgetsRoot] = chat.roots("acme/gadgets");
+    expect(gadgetsRoot!.message).toContain("[#77](https://github.com/acme/gadgets/pull/77)");
+
+    await send("closed", { merged: true, body: "" });
+    expect(widgetsRoot!.message).toContain("(🟣 mergée)");
+    expect(chat.replies(widgetsRoot!.id)[1]).toMatch(/^🟣 PR gadgets#77 mergée par/);
+    expect(chat.replies(gadgetsRoot!.id)[1]).toMatch(/^🟣 PR #77 mergée par/);
+  });
+
+  it("opens a thread in the destination channel when an issue moves to another configured repository", async () => {
+    setupRepos([
+      { repo: REPO, channel: "widgets" },
+      { repo: OTHER_REPO, channel: "gadgets" },
+    ]);
+    await issues("opened", issue1201);
+    await issues("transferred", issue1201, {
+      changes: { new_repository: { full_name: OTHER_REPO }, new_issue: gadget(31, { title: "Moved here" }) },
+    });
+    expect(chat.roots("acme/widgets")[0]!.message).toContain("➡️ Transférée");
+    expect(chat.roots("acme/gadgets")).toEqual([expect.objectContaining({ message: expect.stringContaining("Moved here") })]);
+  });
+
+  it("recreates threads in the new channel when a repository changes channel", async () => {
+    github.histories.set(1201, [{ at: "2026-10-17T07:00:00Z", actor: "outside-user", kind: "commented", body: "logs", url: "u1" }]);
+    await issues("opened", issue1201);
+    expect(chat.roots("acme/github-issues")).toHaveLength(1);
+
+    const config = testConfig({ repos: [{ repo: REPO, channel: "new-home" }] });
+    notifier = new Notifier(config, store, chat, github, 0);
+    await notifier.reconcile();
+    const [moved] = chat.roots("acme/new-home");
+    expect(moved!.message).toContain("#1201");
+    expect(chat.replies(moved!.id)).toEqual([expect.stringContaining("logs")]);
+  });
+
+  it("applies per-repository reply settings", async () => {
+    setupRepos([
+      { repo: REPO, channel: "widgets" },
+      { repo: OTHER_REPO, channel: "gadgets", events: { commented: false } },
+    ]);
+    await notifier.handleEvent("issue_comment", {
+      action: "created",
+      issue: gadget(1201),
+      comment: { body: "muted", html_url: "c", user: user("outside-user"), created_at: "2026-10-22T00:00:00Z" },
+      sender: user("outside-user"),
+      repository: gadgets,
+    });
+    await comment(issue1201, "outside-user", "shown");
+    expect(chat.replies(chat.roots("acme/gadgets")[0]!.id)).toEqual([]);
+    expect(chat.replies(chat.roots("acme/widgets")[0]!.id)).toEqual([expect.stringContaining("shown")]);
   });
 });

@@ -9,6 +9,10 @@ export interface RenderOptions {
 }
 
 export interface RootState {
+  /** `owner/name` of the issue. */
+  repo: string;
+  /** Name the repository in the title, for channels shared by several repositories. */
+  showRepo: boolean;
   issue: IssueSnapshot;
   prs: LinkedPr[];
   duplicateOf: number | null;
@@ -39,6 +43,13 @@ export function defuseUrls(text: string): string {
     });
 }
 
+const shortName = (repo: string) => repo.slice(repo.indexOf("/") + 1);
+
+/** `#12` for a PR of the issue's repository, `name#12` for one of another repository. */
+function prRef(pr: LinkedPr, issueRepo: string): string {
+  return pr.repo.toLowerCase() === issueRepo.toLowerCase() ? `#${pr.number}` : `${shortName(pr.repo)}#${pr.number}`;
+}
+
 const TYPE_EMOJI: Record<string, string> = { bug: "🐛", feature: "✨", task: "📋" };
 const PR_STATE: Record<PrState, string> = { open: "🟢 ouverte", merged: "🟣 mergée", closed: "🔴 fermée" };
 
@@ -59,9 +70,10 @@ export class Renderer {
     return `**${login}**`;
   }
 
-  root({ issue, prs, duplicateOf, gone }: RootState): string {
+  root({ repo, showRepo, issue, prs, duplicateOf, gone }: RootState): string {
     const emoji = TYPE_EMOJI[issue.type?.toLowerCase() ?? ""] ?? "📝";
-    const title = `[#${issue.number}](${issue.url}) · ${neutralizeMentions(issue.title)}`;
+    const ref = `${showRepo ? shortName(repo) : ""}#${issue.number}`;
+    const title = `[${ref}](${issue.url}) · ${neutralizeMentions(issue.title)}`;
     // A rule plus a heading so each thread stands out in the channel. The blank line keeps
     // `---` from turning the previous line into a setext heading.
     const header = `---\n\n#### ${emoji} ${gone ? `~~${title}~~` : title}`;
@@ -78,7 +90,9 @@ export class Renderer {
 
     const lines = [header, status.join(" · "), people.join(" · ")];
     if (prs.length) {
-      const list = [...prs].sort((a, b) => a.number - b.number).map((pr) => `[#${pr.number}](${pr.url}) (${PR_STATE[pr.state]})`);
+      const list = [...prs]
+        .sort((a, b) => a.repo.localeCompare(b.repo) || a.number - b.number)
+        .map((pr) => `[${prRef(pr, repo)}](${pr.url}) (${PR_STATE[pr.state]})`);
       lines.push(`PRs liées : ${list.join(", ")}`);
     }
     return lines.join("\n");
@@ -180,23 +194,23 @@ export class Renderer {
     return `🗑️ Supprimée par ${this.user(actor)}`;
   }
 
-  prLinked(pr: LinkedPr, author: string): string {
-    return `🔀 PR liée : #${pr.number} ${neutralizeMentions(pr.title)} par ${this.user(author)}`;
+  prLinked(pr: LinkedPr, issueRepo: string, author: string): string {
+    return `🔀 PR liée : ${prRef(pr, issueRepo)} ${neutralizeMentions(pr.title)} par ${this.user(author)}`;
   }
 
-  prMerged(pr: LinkedPr, actor: string): string {
-    return `🟣 PR #${pr.number} mergée par ${this.user(actor)}`;
+  prMerged(pr: LinkedPr, issueRepo: string, actor: string): string {
+    return `🟣 PR ${prRef(pr, issueRepo)} mergée par ${this.user(actor)}`;
   }
 
-  prClosed(pr: LinkedPr, actor: string): string {
-    return `🔴 PR #${pr.number} fermée sans merge par ${this.user(actor)}`;
+  prClosed(pr: LinkedPr, issueRepo: string, actor: string): string {
+    return `🔴 PR ${prRef(pr, issueRepo)} fermée sans merge par ${this.user(actor)}`;
   }
 
   /**
    * A past event replayed into a new thread, prefixed with its original date.
    * Use a renderer without team mapping so history never mentions anyone.
    */
-  historyEntry(e: HistoryEvent, issue: IssueSnapshot): string {
+  historyEntry(e: HistoryEvent, issue: IssueSnapshot, repo: string): string {
     const date = new Intl.DateTimeFormat("fr-CH", {
       day: "2-digit",
       month: "2-digit",
@@ -205,10 +219,10 @@ export class Renderer {
       minute: "2-digit",
       timeZone: this.opts.timezone ?? "Europe/Zurich",
     }).format(new Date(e.at));
-    return `🕰️ _${date}_\n${this.historyBody(e, issue)}`;
+    return `🕰️ _${date}_\n${this.historyBody(e, issue, repo)}`;
   }
 
-  private historyBody(e: HistoryEvent, issue: IssueSnapshot): string {
+  private historyBody(e: HistoryEvent, issue: IssueSnapshot, repo: string): string {
     switch (e.kind) {
       case "commented":
         return this.commented(e.actor, e.body);
@@ -230,7 +244,7 @@ export class Renderer {
       case "reopened":
         return this.reopened(e.actor);
       case "pr_linked":
-        return this.prLinked(e.pr, e.actor);
+        return this.prLinked(e.pr, repo, e.actor);
     }
   }
 }

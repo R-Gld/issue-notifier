@@ -4,16 +4,18 @@ import { fetchJson, HttpError } from "./http.ts";
 export class PostMissingError extends Error {}
 
 export interface Chat {
-  createPost(message: string, rootId?: string): Promise<string>;
+  /** Channel id from team and channel names. */
+  resolveChannel(team: string, channel: string): Promise<string>;
+  createPost(channelId: string, message: string, rootId?: string): Promise<string>;
   /** Throws PostMissingError when the post was deleted. */
   editPost(postId: string, message: string): Promise<void>;
 }
 
 /** Minimal kChat (Mattermost API v4) client acting as the bot account. */
 export class KChat implements Chat {
-  private channelId: string | null = null;
+  private readonly channels = new Map<string, string>();
 
-  constructor(private readonly opts: { url: string; token: string; team: string; channel: string }) {}
+  constructor(private readonly opts: { url: string; token: string }) {}
 
   private request<T>(method: string, path: string, body?: unknown): Promise<T> {
     return fetchJson<T>(`${this.opts.url}/api/v4${path}`, {
@@ -23,20 +25,21 @@ export class KChat implements Chat {
     });
   }
 
-  async resolveChannel(): Promise<string> {
-    if (!this.channelId) {
-      const { team, channel } = this.opts;
+  async resolveChannel(team: string, channel: string): Promise<string> {
+    const key = `${team}/${channel}`.toLowerCase();
+    let id = this.channels.get(key);
+    if (!id) {
       const c = await this.request<{ id: string }>(
         "GET",
         `/teams/name/${encodeURIComponent(team)}/channels/name/${encodeURIComponent(channel)}`,
       );
-      this.channelId = c.id;
+      id = c.id;
+      this.channels.set(key, id);
     }
-    return this.channelId;
+    return id;
   }
 
-  async createPost(message: string, rootId?: string): Promise<string> {
-    const channel_id = await this.resolveChannel();
+  async createPost(channel_id: string, message: string, rootId?: string): Promise<string> {
     try {
       const post = await this.request<{ id: string }>("POST", "/posts", { channel_id, message, root_id: rootId ?? "" });
       return post.id;

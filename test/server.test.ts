@@ -16,7 +16,7 @@ beforeEach(async () => {
   chat = new FakeChat();
   const store = new Store(":memory:");
   notifier = new Notifier(testConfig(), store, chat, new FakeGitHub(), 0);
-  const server = createApp({ secret: SECRET, repo: REPO, notifier, store });
+  const server = createApp({ secret: SECRET, repos: [REPO], notifier, store });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   close = () => server.close();

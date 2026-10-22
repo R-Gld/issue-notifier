@@ -8,14 +8,14 @@ export type IssueLookup =
   | { kind: "deleted" };
 
 export interface GitHubApi {
-  getIssue(number: number): Promise<IssueLookup>;
-  listOpenIssues(): Promise<IssueSnapshot[]>;
-  /** PRs of the repo that reference the issue, from its timeline. */
-  linkedPrs(number: number): Promise<LinkedPr[]>;
+  getIssue(repo: string, number: number): Promise<IssueLookup>;
+  listOpenIssues(repo: string): Promise<IssueSnapshot[]>;
+  /** PRs of the configured repositories that reference the issue, from its timeline. */
+  linkedPrs(repo: string, number: number): Promise<LinkedPr[]>;
   /** Comments and events of the issue, oldest first, bots excluded. */
-  history(number: number): Promise<HistoryEvent[]>;
+  history(repo: string, number: number): Promise<HistoryEvent[]>;
   /** Canonical issue of an issue closed as duplicate, if GitHub knows it. */
-  duplicateOf(number: number): Promise<number | null>;
+  duplicateOf(repo: string, number: number): Promise<number | null>;
 }
 
 interface GhActor {
@@ -48,8 +48,9 @@ interface GhTimelineEvent {
 export class GitHub implements GitHubApi {
   private readonly base = "https://api.github.com";
 
+  /** PRs are only linked when they belong to one of `repos`. */
   constructor(
-    private readonly repo: string,
+    private readonly repos: readonly string[],
     private readonly token?: string,
   ) {}
 
@@ -66,12 +67,12 @@ export class GitHub implements GitHubApi {
     return fetchJson<T>(`${this.base}${path}`, { headers: this.headers() });
   }
 
-  async getIssue(number: number): Promise<IssueLookup> {
+  async getIssue(repo: string, number: number): Promise<IssueLookup> {
     try {
-      const issue = await this.get<GhIssue & { repository_url: string }>(`/repos/${this.repo}/issues/${number}`);
+      const issue = await this.get<GhIssue & { repository_url: string }>(`/repos/${repo}/issues/${number}`);
       if (issue.pull_request) return { kind: "pull_request" };
       // A transferred issue redirects to its new repository.
-      if (!issue.repository_url.toLowerCase().endsWith(`/repos/${this.repo.toLowerCase()}`)) return { kind: "transferred" };
+      if (!issue.repository_url.toLowerCase().endsWith(`/repos/${repo.toLowerCase()}`)) return { kind: "transferred" };
       return { kind: "issue", issue: toSnapshot(issue) };
     } catch (err) {
       if (err instanceof HttpError && (err.status === 404 || err.status === 410)) return { kind: "deleted" };
@@ -79,30 +80,33 @@ export class GitHub implements GitHubApi {
     }
   }
 
-  async listOpenIssues(): Promise<IssueSnapshot[]> {
+  async listOpenIssues(repo: string): Promise<IssueSnapshot[]> {
     const out: IssueSnapshot[] = [];
     for (let page = 1; ; page++) {
-      const batch = await this.get<GhIssue[]>(`/repos/${this.repo}/issues?state=open&per_page=100&page=${page}`);
+      const batch = await this.get<GhIssue[]>(`/repos/${repo}/issues?state=open&per_page=100&page=${page}`);
       out.push(...batch.filter((i) => !i.pull_request).map(toSnapshot));
       if (batch.length < 100) return out;
     }
   }
 
-  private async timeline(number: number): Promise<GhTimelineEvent[]> {
+  private async timeline(repo: string, number: number): Promise<GhTimelineEvent[]> {
     const out: GhTimelineEvent[] = [];
     for (let page = 1; ; page++) {
-      const events = await this.get<GhTimelineEvent[]>(`/repos/${this.repo}/issues/${number}/timeline?per_page=100&page=${page}`);
+      const events = await this.get<GhTimelineEvent[]>(`/repos/${repo}/issues/${number}/timeline?per_page=100&page=${page}`);
       out.push(...events);
       if (events.length < 100) return out;
     }
   }
 
-  /** A PR of this repo referencing the issue, if the event is one. */
+  /** A PR of a configured repository referencing the issue, if the event is one. */
   private linkedPr(e: GhTimelineEvent): LinkedPr | null {
     const src = e.source?.issue;
     if (e.event !== "cross-referenced" || !src?.pull_request) return null;
-    if (src.repository?.full_name.toLowerCase() !== this.repo.toLowerCase()) return null;
+    const name = src.repository?.full_name.toLowerCase();
+    const repo = this.repos.find((r) => r.toLowerCase() === name);
+    if (!repo) return null;
     return {
+      repo,
       number: src.number,
       title: src.title,
       url: src.html_url,
@@ -110,18 +114,18 @@ export class GitHub implements GitHubApi {
     };
   }
 
-  async linkedPrs(number: number): Promise<LinkedPr[]> {
-    const prs = new Map<number, LinkedPr>();
-    for (const e of await this.timeline(number)) {
+  async linkedPrs(repo: string, number: number): Promise<LinkedPr[]> {
+    const prs = new Map<string, LinkedPr>();
+    for (const e of await this.timeline(repo, number)) {
       const pr = this.linkedPr(e);
-      if (pr) prs.set(pr.number, pr);
+      if (pr) prs.set(`${pr.repo}#${pr.number}`, pr);
     }
     return [...prs.values()];
   }
 
-  async history(number: number): Promise<HistoryEvent[]> {
+  async history(repo: string, number: number): Promise<HistoryEvent[]> {
     const out: HistoryEvent[] = [];
-    for (const e of await this.timeline(number)) {
+    for (const e of await this.timeline(repo, number)) {
       const who = e.event === "commented" ? e.user : e.actor;
       if (!e.created_at || !who || isBot(who)) continue;
       const base = { at: e.created_at, actor: who.login };
@@ -169,10 +173,10 @@ export class GitHub implements GitHubApi {
     return out.sort((a, b) => a.at.localeCompare(b.at));
   }
 
-  async duplicateOf(number: number): Promise<number | null> {
+  async duplicateOf(repo: string, number: number): Promise<number | null> {
     // REST does not expose the canonical issue; GraphQL does, but requires a token.
     if (!this.token) return null;
-    const [owner, name] = this.repo.split("/");
+    const [owner, name] = repo.split("/");
     const res = await fetchJson<{
       data?: { repository?: { issue?: { timelineItems: { nodes: Array<{ canonical?: { number: number } | null }> } } } };
     }>(`${this.base}/graphql`, {

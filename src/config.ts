@@ -42,18 +42,29 @@ const DEFAULT_EVENTS: Record<ReplyEvent, boolean> = {
   deleted: false,
 };
 
+const eventsSchema = z.partialRecord(z.enum(REPLY_EVENTS), z.boolean()).nullish().transform((v) => v ?? {});
+
 const fileSchema = z.object({
-  github: z.object({
-    repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/, "expected owner/name"),
-  }),
   kchat: z.object({
     url: z.url(),
+    /** Default kChat team of the channels. */
     team: z.string().min(1),
-    channel: z.string().min(1),
   }),
-  /** GitHub login → kChat username. Everyone listed here is considered part of the team. */
+  /** GitHub login → kChat username. Only these users can be mentioned. */
   team: z.record(z.string(), z.string()).nullish().transform((v) => v ?? {}),
-  events: z.partialRecord(z.enum(REPLY_EVENTS), z.boolean()).nullish().transform((v) => v ?? {}),
+  /** Default reply events, overridable per repository. */
+  events: eventsSchema,
+  repos: z
+    .array(
+      z.object({
+        repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/, "expected owner/name"),
+        channel: z.string().min(1),
+        kchatTeam: z.string().min(1).optional(),
+        events: eventsSchema,
+      }),
+    )
+    .min(1)
+    .refine((r) => new Set(r.map((x) => x.repo.toLowerCase())).size === r.length, "each repository can only be listed once"),
   comments: z.object({ excerptLength: z.number().int().positive().default(300) }).default({ excerptLength: 300 }),
   reconcile: z
     .object({
@@ -73,13 +84,22 @@ const envSchema = z.object({
   HOST: z.string().default("0.0.0.0"),
 });
 
-export interface Config {
+export interface RepoConfig {
+  /** `owner/name`, as written in the config. */
   repo: string;
-  kchat: { url: string; team: string; channel: string; token: string };
+  kchatTeam: string;
+  channel: string;
+  events: Record<ReplyEvent, boolean>;
+  /** The channel also receives other repositories: thread titles name the repository. */
+  sharedChannel: boolean;
+}
+
+export interface Config {
+  repos: RepoConfig[];
+  kchat: { url: string; token: string };
   github: { token?: string; webhookSecret: string };
   /** GitHub login (lowercased) → kChat username. */
   team: Map<string, string>;
-  events: Record<ReplyEvent, boolean>;
   excerptLength: number;
   reconcile: { cron: string; timezone: string };
   dbPath: string;
@@ -90,12 +110,20 @@ export interface Config {
 export function buildConfig(file: unknown, env: NodeJS.ProcessEnv): Config {
   const f = fileSchema.parse(file);
   const e = envSchema.parse(env);
+  const channelKey = (r: { kchatTeam?: string; channel: string }) => `${r.kchatTeam ?? f.kchat.team}/${r.channel}`.toLowerCase();
+  const perChannel = new Map<string, number>();
+  for (const r of f.repos) perChannel.set(channelKey(r), (perChannel.get(channelKey(r)) ?? 0) + 1);
   return {
-    repo: f.github.repo,
-    kchat: { url: f.kchat.url.replace(/\/+$/, ""), team: f.kchat.team, channel: f.kchat.channel, token: e.KCHAT_TOKEN },
+    repos: f.repos.map((r) => ({
+      repo: r.repo,
+      kchatTeam: r.kchatTeam ?? f.kchat.team,
+      channel: r.channel,
+      events: { ...DEFAULT_EVENTS, ...f.events, ...r.events },
+      sharedChannel: perChannel.get(channelKey(r))! > 1,
+    })),
+    kchat: { url: f.kchat.url.replace(/\/+$/, ""), token: e.KCHAT_TOKEN },
     github: { token: e.GITHUB_TOKEN || undefined, webhookSecret: e.GITHUB_WEBHOOK_SECRET },
     team: new Map(Object.entries(f.team).map(([gh, kchat]) => [gh.toLowerCase(), kchat.replace(/^@/, "")])),
-    events: { ...DEFAULT_EVENTS, ...f.events },
     excerptLength: f.comments.excerptLength,
     reconcile: f.reconcile,
     dbPath: e.DB_PATH,
@@ -107,4 +135,10 @@ export function buildConfig(file: unknown, env: NodeJS.ProcessEnv): Config {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const path = env.CONFIG_PATH ?? "config.yml";
   return buildConfig(parse(readFileSync(path, "utf8")), env);
+}
+
+/** The configured repository matching `name` (case-insensitive), if any. */
+export function findRepo(config: Config, name: string | null | undefined): RepoConfig | undefined {
+  const n = name?.toLowerCase();
+  return config.repos.find((r) => r.repo.toLowerCase() === n);
 }

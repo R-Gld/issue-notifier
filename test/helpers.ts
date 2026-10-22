@@ -5,6 +5,7 @@ import type { GitHubApi, IssueLookup } from "../src/github.ts";
 import { PostMissingError, type Chat } from "../src/kchat.ts";
 
 export const REPO = "acme/widgets";
+export const OTHER_REPO = "acme/gadgets";
 
 export function fixture<T = GhIssue>(name: string): T {
   return JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8")) as T;
@@ -13,8 +14,8 @@ export function fixture<T = GhIssue>(name: string): T {
 export function testConfig(overrides: Record<string, unknown> = {}): Config {
   return buildConfig(
     {
-      github: { repo: REPO },
-      kchat: { url: "https://chat.example.com", team: "acme", channel: "github-issues" },
+      kchat: { url: "https://chat.example.com", team: "acme" },
+      repos: [{ repo: REPO, channel: "github-issues" }],
       team: { "rob-dev": "rob.dev", "alice-dev": "alice.dev" },
       ...overrides,
     },
@@ -26,6 +27,7 @@ export const user = (login: string, type = "User") => ({ login, type });
 
 interface Post {
   id: string;
+  channelId: string;
   message: string;
   rootId?: string;
 }
@@ -39,11 +41,16 @@ export class FakeChat implements Chat {
   private seq = 0;
   private calls = 0;
 
-  async createPost(message: string, rootId?: string): Promise<string> {
+  async resolveChannel(team: string, channel: string): Promise<string> {
+    return `${team}/${channel}`;
+  }
+
+  async createPost(channelId: string, message: string, rootId?: string): Promise<string> {
     if (this.calls++ === this.failAt) throw new Error("kChat unavailable");
-    if (rootId && (this.deleted.has(rootId) || !this.posts.some((p) => p.id === rootId))) throw new PostMissingError(rootId);
+    const root = this.posts.find((p) => p.id === rootId);
+    if (rootId && (this.deleted.has(rootId) || root?.channelId !== channelId)) throw new PostMissingError(rootId);
     const id = `post${++this.seq}`;
-    this.posts.push({ id, message, rootId });
+    this.posts.push({ id, channelId, message, rootId });
     return id;
   }
 
@@ -53,8 +60,9 @@ export class FakeChat implements Chat {
     post.message = message;
   }
 
-  roots(): Post[] {
-    return this.posts.filter((p) => !p.rootId && !this.deleted.has(p.id));
+  /** Live root posts, optionally of one channel (`team/channel`). */
+  roots(channelId?: string): Post[] {
+    return this.posts.filter((p) => !p.rootId && !this.deleted.has(p.id) && (!channelId || p.channelId === channelId));
   }
 
   replies(rootId: string): string[] {
@@ -62,34 +70,59 @@ export class FakeChat implements Chat {
   }
 }
 
-export class FakeGitHub implements GitHubApi {
+/** Fake GitHub data of one repository. */
+class FakeRepo {
   issues = new Map<number, IssueLookup>();
   prs = new Map<number, LinkedPr[]>();
   duplicates = new Map<number, number>();
   histories = new Map<number, HistoryEvent[]>();
+}
 
-  addIssue(issue: IssueSnapshot): this {
-    this.issues.set(issue.number, { kind: "issue", issue });
+/** In-memory GitHub. The `issues`, `prs`… shortcuts address REPO; `repo(name)` any other. */
+export class FakeGitHub implements GitHubApi {
+  private readonly repos = new Map<string, FakeRepo>();
+
+  repo(name: string): FakeRepo {
+    const key = name.toLowerCase();
+    if (!this.repos.has(key)) this.repos.set(key, new FakeRepo());
+    return this.repos.get(key)!;
+  }
+
+  get issues() {
+    return this.repo(REPO).issues;
+  }
+  get prs() {
+    return this.repo(REPO).prs;
+  }
+  get duplicates() {
+    return this.repo(REPO).duplicates;
+  }
+  get histories() {
+    return this.repo(REPO).histories;
+  }
+
+  addIssue(issue: IssueSnapshot, repo = REPO): this {
+    this.repo(repo).issues.set(issue.number, { kind: "issue", issue });
     return this;
   }
 
-  async getIssue(number: number): Promise<IssueLookup> {
-    return this.issues.get(number) ?? { kind: "deleted" };
+  async getIssue(repo: string, number: number): Promise<IssueLookup> {
+    return this.repo(repo).issues.get(number) ?? { kind: "deleted" };
   }
 
-  async listOpenIssues(): Promise<IssueSnapshot[]> {
-    return [...this.issues.values()].flatMap((l) => (l.kind === "issue" && l.issue.state === "open" ? [l.issue] : []));
+  async listOpenIssues(repo: string): Promise<IssueSnapshot[]> {
+    return [...this.repo(repo).issues.values()].flatMap((l) => (l.kind === "issue" && l.issue.state === "open" ? [l.issue] : []));
   }
 
-  async linkedPrs(number: number): Promise<LinkedPr[]> {
-    return this.prs.get(number) ?? [];
+  async linkedPrs(repo: string, number: number): Promise<LinkedPr[]> {
+    return this.repo(repo).prs.get(number) ?? [];
   }
 
-  async history(number: number): Promise<HistoryEvent[]> {
-    return this.histories.get(number) ?? [];
+  async history(repo: string, number: number): Promise<HistoryEvent[]> {
+    return this.repo(repo).histories.get(number) ?? [];
   }
 
-  async duplicateOf(number: number): Promise<number | null> {
-    return this.duplicates.get(number) ?? null;
+  async duplicateOf(repo: string, number: number): Promise<number | null> {
+    return this.repo(repo).duplicates.get(number) ?? null;
   }
 }

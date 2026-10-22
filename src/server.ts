@@ -22,7 +22,8 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-export function createApp(deps: { secret: string; repo: string; notifier: Notifier; store: Store }): Server {
+export function createApp(deps: { secret: string; repos: readonly string[]; notifier: Notifier; store: Store }): Server {
+  const repos = new Set(deps.repos.map((r) => r.toLowerCase()));
   return createServer(async (req, res) => {
     const send = (status: number, body: string) => res.writeHead(status, { "Content-Type": "text/plain" }).end(body);
     const path = (req.url ?? "/").split("?")[0];
@@ -56,10 +57,15 @@ export function createApp(deps: { secret: string; repo: string; notifier: Notifi
     } catch {
       return send(400, "invalid json");
     }
-    if (payload.repository?.full_name?.toLowerCase() !== deps.repo.toLowerCase()) return send(202, "ignored repository");
+    if (!repos.has(payload.repository?.full_name?.toLowerCase() ?? "")) return send(202, "ignored repository");
     if (delivery && !deps.store.markDelivery(delivery)) return send(200, "duplicate delivery");
 
-    log.info("webhook received", { event, action: (payload as { action?: string }).action, delivery });
+    log.info("webhook received", {
+      repo: payload.repository?.full_name,
+      event,
+      action: (payload as { action?: string }).action,
+      delivery,
+    });
     void deps.notifier.enqueue(`${event} ${delivery}`, () => deps.notifier.handleEvent(event, payload));
     return send(202, "accepted");
   });
