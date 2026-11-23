@@ -127,6 +127,7 @@ The repository's `compose.yml` is the same as above, plus `build: .`.
 
 ```yaml
 locale: en                          # en (default) or fr
+icons: github                       # github (default) or emoji, see GitHub icons below
 kchat:
   url: https://chat.example.com     # API host, without /api/v4
   team: my-team                     # default team of the channels
@@ -144,6 +145,12 @@ team:                               # GitHub login → chat username, for every 
   octocat: octo.cat
 events: { renamed: false }          # default reply events (see config.example.yml)
 ```
+
+### GitHub icons
+
+With `icons: github`, statuses show GitHub's own octicons (issue opened, closed, not planned, merged PR…) instead of standard emojis. They are custom emojis named `gh-issue-opened`, `gh-git-merge`… (images in `assets/emojis/`). At startup the bot creates those missing from the chat server, which needs custom emojis enabled and the bot allowed to create them. If any of them can be neither found nor created (no permission, kChat emoji quota reached: 10 are needed), every status keeps its standard emoji, with a warning in the logs; the next startup tries again.
+
+Switching icons edits the root posts of open issues at the next startup (an edit, no notification). Replies already posted, and root posts of closed issues until their next event, keep their old icons.
 
 ### Finding the kChat values
 

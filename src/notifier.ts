@@ -2,6 +2,7 @@ import { findRepo, type Config, type RepoConfig, type ReplyEvent } from "./confi
 import { isBot, toSnapshot, type GhIssue, type Gone, type IssueRef, type IssueSnapshot, type LinkedPr } from "./domain.ts";
 import type { GitHubApi } from "./github.ts";
 import type { Locale } from "./i18n.ts";
+import type { Icons } from "./icons.ts";
 import { PostMissingError, type Chat } from "./kchat.ts";
 import { log } from "./log.ts";
 import { extractIssueRefs } from "./refs.ts";
@@ -75,14 +76,18 @@ export class Notifier {
     private readonly store: Store,
     private readonly chat: Chat,
     private readonly github: GitHubApi,
-    /** Pause between replayed history posts, to stay clear of kChat rate limits. */
-    private readonly historyDelayMs = 150,
+    private readonly opts: {
+      /** Status icons, as resolved at startup. */
+      icons?: Icons;
+      /** Pause between replayed history posts, to stay clear of kChat rate limits. */
+      historyDelayMs?: number;
+    } = {},
   ) {}
 
   private renderer(repo: RepoConfig, quiet = false): Renderer {
     let r = this.renderers.get(repo.locale);
     if (!r) {
-      const base = { excerptLength: this.config.excerptLength, locale: repo.locale, timezone: this.config.reconcile.timezone };
+      const base = { excerptLength: this.config.excerptLength, locale: repo.locale, timezone: this.config.reconcile.timezone, icons: this.opts.icons };
       r = { live: new Renderer({ ...base, team: this.config.team }), quiet: new Renderer({ ...base, team: new Map() }) };
       this.renderers.set(repo.locale, r);
     }
@@ -353,7 +358,8 @@ export class Notifier {
       for (let i = cursor; i < entries.length; i++) {
         await this.chat.createPost(channelId, this.renderer(repo, true).historyEntry(entries[i]!, issue, repo.repo), postId);
         this.store.setHistoryProgress(ref, i + 1, false);
-        if (this.historyDelayMs) await new Promise((r) => setTimeout(r, this.historyDelayMs));
+        const delay = this.opts.historyDelayMs ?? 150;
+        if (delay) await new Promise((r) => setTimeout(r, delay));
       }
       this.store.setHistoryProgress(ref, entries.length, true);
       if (entries.length > cursor) log.info("history replayed", { repo: repo.repo, issue: issue.number, entries: entries.length - cursor });

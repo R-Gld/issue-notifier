@@ -18,7 +18,7 @@ function setup(config = testConfig()) {
   chat = new FakeChat();
   github = new FakeGitHub().addIssue(toSnapshot(issue1201)).addIssue(toSnapshot({ ...issue1202, state: "open", state_reason: null }));
   store = new Store(":memory:");
-  notifier = new Notifier(config, store, chat, github, 0);
+  notifier = new Notifier(config, store, chat, github, { historyDelayMs: 0 });
 }
 
 const issues = (action: string, issue: GhIssue, extra: Record<string, unknown> = {}) =>
@@ -331,7 +331,7 @@ describe("several repositories", () => {
     expect(chat.roots("acme/github-issues")).toHaveLength(1);
 
     const config = testConfig({ repos: [{ repo: REPO, channel: "new-home" }] });
-    notifier = new Notifier(config, store, chat, github, 0);
+    notifier = new Notifier(config, store, chat, github, { historyDelayMs: 0 });
     await notifier.reconcile();
     const [moved] = chat.roots("acme/new-home");
     expect(moved!.message).toContain("#1201");

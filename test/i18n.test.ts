@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { toSnapshot } from "../src/domain.ts";
-import { LOCALES, MESSAGES, type Messages } from "../src/i18n.ts";
+import { LOCALES, messages, type Locale, type Messages } from "../src/i18n.ts";
+import { EMOJI_ICONS } from "../src/icons.ts";
 import { Renderer } from "../src/render.ts";
 import { fixture, OTHER_REPO, REPO } from "./helpers.ts";
 
@@ -16,6 +17,8 @@ function renderAll(m: Messages): string[] {
   out.push(m.transferred(null, "B"));
   return out;
 }
+
+const MESSAGES = Object.fromEntries(LOCALES.map((l) => [l, messages(l, EMOJI_ICONS)])) as Record<Locale, Messages>;
 
 const shape = (v: unknown): unknown =>
   typeof v === "object" && v !== null ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, shape(x)])) : typeof v;

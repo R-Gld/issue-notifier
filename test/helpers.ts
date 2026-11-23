@@ -67,6 +67,21 @@ export class FakeChat implements Chat {
     return post && !this.deleted.has(postId) ? post.channelId : null;
   }
 
+  /** Custom emojis present on the server. */
+  emojis = new Set<string>();
+
+  /** Refuse to create emojis, like a bot without the permission. */
+  denyEmojis = false;
+
+  async emojiExists(name: string): Promise<boolean> {
+    return this.emojis.has(name);
+  }
+
+  async createEmoji(name: string, _png: Uint8Array<ArrayBuffer>): Promise<void> {
+    if (this.denyEmojis) throw new Error("403 forbidden");
+    this.emojis.add(name);
+  }
+
   /** Live root posts, optionally of one channel (`team/channel`). */
   roots(channelId?: string): Post[] {
     return this.posts.filter((p) => !p.rootId && !this.deleted.has(p.id) && (!channelId || p.channelId === channelId));

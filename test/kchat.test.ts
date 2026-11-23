@@ -85,3 +85,28 @@ describe("KChat", () => {
     await expect(kchat.postChannel("err")).rejects.toBeInstanceOf(HttpError);
   });
 });
+
+describe("KChat custom emojis", () => {
+  it("tells whether an emoji exists, treating disabled custom emojis as missing", async () => {
+    mockFetch(
+      on("GET", "/emoji/name/gh-ok", { body: { id: "e1" } }),
+      on("GET", "/emoji/name/gh-missing", { status: 404 }),
+      on("GET", "/emoji/name/gh-disabled", { status: 501 }),
+      on("GET", "/emoji/name/gh-denied", { status: 401 }),
+    );
+    expect(await kchat.emojiExists("gh-ok")).toBe(true);
+    expect(await kchat.emojiExists("gh-missing")).toBe(false);
+    expect(await kchat.emojiExists("gh-disabled")).toBe(false);
+    await expect(kchat.emojiExists("gh-denied")).rejects.toBeInstanceOf(HttpError);
+  });
+
+  it("creates an emoji as multipart, in the bot's name", async () => {
+    const { fetch } = mockFetch(on("GET", "/users/me", { body: { id: "u1" } }), on("POST", "/api/v4/emoji", { status: 201, body: { id: "e1" } }));
+    await kchat.createEmoji("gh-trash", new Uint8Array([1, 2, 3]));
+    const init = fetch.mock.calls[1]![1]!;
+    expect(new Headers(init.headers).get("content-type")).toBeNull();
+    const form = init.body as FormData;
+    expect(JSON.parse(form.get("emoji") as string)).toEqual({ name: "gh-trash", creator_id: "u1" });
+    expect((form.get("image") as File).size).toBe(3);
+  });
+});
