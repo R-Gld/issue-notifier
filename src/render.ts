@@ -101,9 +101,8 @@ export class Renderer {
     const emoji = TYPE_EMOJI[issue.type?.toLowerCase() ?? ""] ?? "📝";
     const ref = `${showRepo ? shortName(repo) : ""}#${issue.number}`;
     const title = `[${ref}](${issue.url}) · ${plain(issue.title)}`;
-    // A rule plus a heading so each thread stands out in the channel. The blank line keeps
-    // `---` from turning the previous line into a setext heading.
-    const header = `---\n\n#### ${emoji} ${gone ? `~~${title}~~` : title}`;
+    // A heading so each thread stands out in the channel.
+    const header = `#### ${emoji} ${gone ? `~~${title}~~` : title}`;
 
     const { field, colon } = this.t;
     const status: string[] = [`${field.status}${colon}${this.status(issue, duplicateOf, gone)}`];
@@ -124,7 +123,9 @@ export class Renderer {
         .map((pr) => `[${prRef(pr, repo)}](${pr.url}) (${this.t.prState[pr.state]})`);
       lines.push(`${field.linkedPrs}${colon}${list.join(", ")}`);
     }
-    return lines.join("\n");
+    // A closing rule separates threads in the channel without being the first thing previews show.
+    // The blank line keeps `---` from turning the last line into a setext heading.
+    return `${lines.join("\n")}\n\n---`;
   }
 
   private status(issue: IssueSnapshot, duplicateOf: number | null, gone: Gone | null): string {

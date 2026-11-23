@@ -22,7 +22,7 @@ kChat is built on Mattermost and this service only uses the Mattermost API v4, s
 
 ### Rendering rules
 
-- Root post: a horizontal rule, then the title as a `####` heading linking to the issue, followed by the status, type, labels, assignees, author and linked PRs. In a channel shared by several repositories, the title names the repository (`gadgets#12` instead of `#12`).
+- Root post: the title as a `####` heading linking to the issue, followed by the status, type, labels, assignees, author and linked PRs, and a closing horizontal rule that separates threads in the channel. In a channel shared by several repositories, the title names the repository (`gadgets#12` instead of `#12`).
 - **No links in replies**: kChat shows a preview of the last link of every post, which would clutter threads. Users are rendered in **bold** without a link, and URLs in comment excerpts are wrapped in backticks. Images become `🖼️ `url``.
 - **No accidental mentions**: every `@` coming from GitHub (comments, titles, labels) is neutralized with an invisible character. Only the bot creates mentions.
 
