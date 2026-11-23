@@ -1,11 +1,14 @@
 import type { Gone, HistoryEvent, IssueSnapshot, LinkedPr } from "./domain.ts";
-import { MESSAGES, type Locale, type Messages } from "./i18n.ts";
+import { messages, type Locale, type Messages } from "./i18n.ts";
+import { EMOJI_ICONS, type Icons } from "./icons.ts";
 
 export interface RenderOptions {
   /** GitHub login (lowercased) → kChat username. */
   team: Map<string, string>;
   excerptLength: number;
   locale: Locale;
+  /** Status icons; standard emojis by default. */
+  icons?: Icons;
   /** Timezone for dates shown in replayed history. */
   timezone?: string;
 }
@@ -77,7 +80,7 @@ export class Renderer {
   private readonly t: Messages;
 
   constructor(private readonly opts: RenderOptions) {
-    this.t = MESSAGES[opts.locale];
+    this.t = messages(opts.locale, opts.icons ?? EMOJI_ICONS);
   }
 
   /** `@kchat` for a mapped user, a bold GitHub profile link otherwise. */

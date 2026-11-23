@@ -4,6 +4,10 @@
 # Language of the messages posted in the chat: en or fr. Each repository can override it.
 locale: en
 
+# Status icons: github (GitHub's octicons, created as custom emojis at startup, see the README)
+# or emoji (standard emojis). If the bot cannot create them all, standard emojis are used.
+icons: github
+
 kchat:
   # Base URL of the kChat / Mattermost API host, without /api/v4.
   # On kChat: https://<team>.kchat.infomaniak.com, with <team> taken from the kSuite channel URL

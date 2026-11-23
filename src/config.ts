@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
 import { LOCALES, type Locale } from "./i18n.ts";
+import { ICON_SETS, type IconSetName } from "./icons.ts";
 
 /** Events that can post a reply in an issue thread. The root post is always kept up to date. */
 export const REPLY_EVENTS = [
@@ -48,6 +49,8 @@ const eventsSchema = z.partialRecord(z.enum(REPLY_EVENTS), z.boolean()).nullish(
 const fileSchema = z.object({
   /** Language of the messages; each repository can override it. */
   locale: z.enum(LOCALES).default("en"),
+  /** `github`: GitHub's octicons, created as custom emojis at startup. `emoji`: standard emojis. */
+  icons: z.enum(ICON_SETS).default("github"),
   kchat: z.object({
     url: z.url(),
     /** Default kChat team of the channels. */
@@ -102,6 +105,7 @@ export interface RepoConfig {
 export interface Config {
   repos: RepoConfig[];
   kchat: { url: string; token: string };
+  icons: IconSetName;
   github: { token?: string; webhookSecret: string };
   /** GitHub login (lowercased) → kChat username. */
   team: Map<string, string>;
@@ -128,6 +132,7 @@ export function buildConfig(file: unknown, env: NodeJS.ProcessEnv): Config {
       sharedChannel: perChannel.get(channelKey(r))! > 1,
     })),
     kchat: { url: f.kchat.url.replace(/\/+$/, ""), token: e.KCHAT_TOKEN },
+    icons: f.icons,
     github: { token: e.GITHUB_TOKEN || undefined, webhookSecret: e.GITHUB_WEBHOOK_SECRET },
     team: new Map(Object.entries(f.team).map(([gh, kchat]) => [gh.toLowerCase(), kchat.replace(/^@/, "")])),
     excerptLength: f.comments.excerptLength,
