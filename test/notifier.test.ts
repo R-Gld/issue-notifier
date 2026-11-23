@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toSnapshot, type GhIssue } from "../src/domain.ts";
+import { resolveIcons } from "../src/icons.ts";
 import { MAX_PR_REFS, Notifier } from "../src/notifier.ts";
 import { Store } from "../src/store.ts";
 import { FakeChat, FakeGitHub, fixture, OTHER_REPO, REPO, testConfig, user } from "./helpers.ts";
@@ -181,6 +182,41 @@ describe("reconcile", () => {
     expect(r1201!.message).toContain("🗑️ Supprimée");
     expect(r1202!.message).toContain("✅ Fermée (completed)");
     expect(chat.posts.filter((p) => p.rootId)).toEqual([]);
+  });
+
+  it("redraws the roots of closed and gone threads after a rendering change, without asking GitHub", async () => {
+    await notifier.reconcile();
+    github.addIssue(toSnapshot(issue1202));
+    github.issues.delete(1201);
+    await notifier.reconcile();
+
+    // Restart with GitHub's icons: neither issue is open any more.
+    const icons = await resolveIcons("github", chat, () => new Uint8Array(1));
+    notifier = new Notifier(testConfig(), store, chat, github, { icons, historyDelayMs: 0 });
+    const lookups = vi.spyOn(github, "getIssue");
+    const edits = vi.spyOn(chat, "editPost");
+    await notifier.reconcile();
+    const [r1201, r1202] = chat.roots();
+    expect(r1201!.message).toContain(":gh-trash: Supprimée");
+    expect(r1202!.message).toContain(":gh-issue-closed: Fermée (completed)");
+    expect(lookups).not.toHaveBeenCalled();
+    expect(edits).toHaveBeenCalledTimes(2);
+    expect(chat.posts.filter((p) => p.rootId)).toEqual([]);
+
+    edits.mockClear();
+    await notifier.reconcile();
+    expect(edits).not.toHaveBeenCalled();
+  });
+
+  it("leaves closed threads of another channel for their next event", async () => {
+    await notifier.reconcile();
+    github.addIssue(toSnapshot(issue1202));
+    await notifier.reconcile();
+    const moved = testConfig({ repos: [{ repo: REPO, channel: "elsewhere" }] });
+    notifier = new Notifier(moved, store, chat, github, { icons: await resolveIcons("github", chat, () => new Uint8Array(1)), historyDelayMs: 0 });
+    const edits = vi.spyOn(chat, "editPost");
+    await notifier.reconcile();
+    expect(edits).not.toHaveBeenCalledWith(chat.roots("acme/github-issues").find((p) => p.message.includes("#1202"))!.id, expect.anything());
   });
 });
 

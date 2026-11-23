@@ -379,11 +379,47 @@ export class Notifier {
 
         for (const issue of open) await this.syncIssue(repo, issue.number, issue);
         for (const n of stale) await this.syncIssue(repo, n);
+        await this.refreshRoots(repo, new Set([...openNumbers, ...stale]));
       } catch (err) {
         log.error("reconcile failed for repository", { repo: repo.repo, err });
       }
     }
     log.info("reconcile done");
+  }
+
+  /**
+   * Re-renders the root post of the threads the reconcile did not sync (closed or gone issues) from
+   * their stored state, without asking GitHub, so a rendering change (icons, wording) reaches them
+   * too. Only posts whose text changes are edited; threads in another channel wait for their next event.
+   */
+  private async refreshRoots(repo: RepoConfig, synced: Set<number>): Promise<void> {
+    const channelId = await this.chat.resolveChannel(repo.kchatTeam, repo.channel);
+    let edited = 0;
+    for (const thread of this.store.threads(repo.repo)) {
+      if (synced.has(thread.issueNumber) || thread.channelId !== channelId) continue;
+      const ref = { repo: repo.repo, number: thread.issueNumber };
+      const rootMessage = this.renderer(repo).root({
+        repo: repo.repo,
+        showRepo: repo.sharedChannel,
+        issue: thread.snapshot,
+        prs: this.store.linkedPrs(ref),
+        duplicateOf: thread.duplicateOf,
+        gone: thread.gone,
+      });
+      if (rootMessage === thread.rootMessage) continue;
+      try {
+        await this.chat.editPost(thread.postId, rootMessage);
+      } catch (err) {
+        if (err instanceof PostMissingError) continue;
+        log.error("cannot refresh root post", { repo: repo.repo, issue: thread.issueNumber, err });
+        continue;
+      }
+      this.store.saveThread({ ...thread, rootMessage });
+      edited++;
+      const delay = this.opts.historyDelayMs ?? 150;
+      if (delay) await new Promise((r) => setTimeout(r, delay));
+    }
+    if (edited) log.info("root posts refreshed", { repo: repo.repo, edited });
   }
 
   private async syncIssue(repo: RepoConfig, number: number, known?: IssueSnapshot): Promise<void> {
