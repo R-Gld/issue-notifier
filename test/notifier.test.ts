@@ -163,7 +163,7 @@ describe("reconcile", () => {
   it("bootstraps threads for open issues, oldest first, and is idempotent", async () => {
     github.prs.set(1202, [{ repo: REPO, number: 1210, title: "fix", url: "u", state: "open" }]);
     await notifier.reconcile();
-    expect(chat.roots().map((p) => p.message.split("\n")[2])).toEqual([
+    expect(chat.roots().map((p) => p.message.split("\n")[0])).toEqual([
       expect.stringContaining("#1201"),
       expect.stringContaining("#1202"),
     ]);
@@ -315,7 +315,7 @@ describe("several repositories", () => {
     ]);
     await issues("opened", issue1201);
     await notifier.handleEvent("issues", { action: "opened", issue: gadget(1201), sender: user("rob-dev"), repository: gadgets });
-    const titles = chat.roots("acme/issues").map((p) => p.message.split("\n")[2]);
+    const titles = chat.roots("acme/issues").map((p) => p.message.split("\n")[0]);
     expect(titles).toEqual([expect.stringContaining("[widgets#1201]"), expect.stringContaining("[gadgets#1201]")]);
   });
 
@@ -325,7 +325,7 @@ describe("several repositories", () => {
       { repo: OTHER_REPO, channel: "gadgets" },
     ]);
     await notifier.reconcile();
-    expect(chat.roots("acme/widgets").map((p) => p.message.split("\n")[2])).toEqual([
+    expect(chat.roots("acme/widgets").map((p) => p.message.split("\n")[0])).toEqual([
       expect.stringContaining("[#1201]"),
       expect.stringContaining("[#1202]"),
     ]);

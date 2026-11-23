@@ -12,11 +12,11 @@ describe("root post", () => {
   it("renders an open issue with a mentioned assignee", () => {
     expect(render.root({ repo: REPO, showRepo: false,  issue: open, prs: [], duplicateOf: null, gone: null })).toBe(
       [
-        "---",
-        "",
         "#### 🐛 [#1201](https://github.com/acme/widgets/issues/1201) · Crash when adding a second sync folder",
         "Statut : 🟢 Ouverte · Type : Bug · Labels : `bug`",
         "Assignee : @alice.dev · Auteur : **outside-user**",
+        "",
+        "---",
       ].join("\n"),
     );
   });
@@ -32,8 +32,8 @@ describe("root post", () => {
     const base = { prs: [], gone: null };
     expect(render.root({ repo: REPO, showRepo: false,  ...base, issue: { ...closed, stateReason: "not_planned" }, duplicateOf: null })).toContain("🚫 Fermée (not planned)");
     expect(render.root({ repo: REPO, showRepo: false,  ...base, issue: { ...closed, stateReason: "duplicate" }, duplicateOf: 1150 })).toContain("🔁 Doublon de #1150");
-    expect(render.root({ repo: REPO, showRepo: false,  ...base, issue: { ...open, assignees: [], type: null }, duplicateOf: null })).toMatch(/^---\n\n#### 📝 [\s\S]*Assignee : —/);
-    expect(render.root({ repo: REPO, showRepo: false,  prs: [], issue: open, duplicateOf: null, gone: "transferred" })).toMatch(/^---\n\n#### 🐛 ~~\[#1201\]\(https:\/\/github\.com\/acme\/widgets\/issues\/1201\) ·[\s\S]*➡️ Transférée/);
+    expect(render.root({ repo: REPO, showRepo: false,  ...base, issue: { ...open, assignees: [], type: null }, duplicateOf: null })).toMatch(/^#### 📝 [\s\S]*Assignee : —/);
+    expect(render.root({ repo: REPO, showRepo: false,  prs: [], issue: open, duplicateOf: null, gone: "transferred" })).toMatch(/^#### 🐛 ~~\[#1201\]\(https:\/\/github\.com\/acme\/widgets\/issues\/1201\) ·[\s\S]*➡️ Transférée/);
   });
 
   it("does not mention unmapped assignees", () => {
@@ -242,7 +242,7 @@ describe("root post details", () => {
     const msg = render.root({ repo: REPO, showRepo: false, issue: { ...open, assignees: ["alice-dev", "unmapped-user"] }, prs, duplicateOf: null, gone: "deleted" });
     expect(msg).toContain("Assignees : @alice.dev, **unmapped-user**");
     expect(msg).toContain("PRs liées : [gadgets#5](https://github.com/acme/gadgets/pull/5) (🟢 ouverte), [#3](https://github.com/acme/widgets/pull/3) (🟣 mergée), [#20](https://github.com/acme/widgets/pull/20) (🔴 fermée)");
-    expect(msg).toMatch(/^---\n\n#### 🐛 ~~\[#1201\]/);
+    expect(msg).toMatch(/^#### 🐛 ~~\[#1201\]/);
     expect(msg).toContain("Statut : 🗑️ Supprimée");
   });
 

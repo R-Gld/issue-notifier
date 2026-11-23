@@ -64,12 +64,12 @@ describe("English rendering", () => {
     const pr = { repo: OTHER_REPO, number: 7, title: "fix", url: "https://github.com/acme/gadgets/pull/7", state: "merged" as const };
     expect(render.root({ repo: REPO, showRepo: false, issue: open, prs: [pr], duplicateOf: null, gone: null })).toBe(
       [
-        "---",
-        "",
         "#### 🐛 [#1201](https://github.com/acme/widgets/issues/1201) · Crash when adding a second sync folder",
         "Status: 🟢 Open · Type: Bug · Labels: `bug`",
         "Assignee: @alice.dev · Author: **outside-user**",
         "Linked PRs: [gadgets#7](https://github.com/acme/gadgets/pull/7) (🟣 merged)",
+        "",
+        "---",
       ].join("\n"),
     );
   });
