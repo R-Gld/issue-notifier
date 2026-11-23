@@ -1,6 +1,7 @@
 import { Cron } from "croner";
 import { loadConfig } from "./config.ts";
 import { GitHub } from "./github.ts";
+import { resolveIcons } from "./icons.ts";
 import { KChat } from "./kchat.ts";
 import { log } from "./log.ts";
 import { Notifier } from "./notifier.ts";
@@ -15,7 +16,8 @@ const github = new GitHub(
   config.repos.map((r) => r.repo),
   config.github.token,
 );
-const notifier = new Notifier(config, store, kchat, github);
+const icons = await resolveIcons(config.icons, kchat);
+const notifier = new Notifier(config, store, kchat, github, { icons });
 
 // Fail fast on a wrong team/channel or token.
 for (const { repo, kchatTeam, channel } of config.repos) {

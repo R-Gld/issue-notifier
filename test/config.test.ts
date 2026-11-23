@@ -23,6 +23,12 @@ describe("config", () => {
     expect(findRepo(config, "acme/unknown")).toBeUndefined();
   });
 
+  it("uses GitHub's icons unless told otherwise", () => {
+    expect(testConfig().icons).toBe("github");
+    expect(testConfig({ icons: "emoji" }).icons).toBe("emoji");
+    expect(() => testConfig({ icons: "octicons" })).toThrow();
+  });
+
   it("flags channels shared by several repositories", () => {
     const config = testConfig({
       repos: [

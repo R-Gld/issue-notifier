@@ -11,6 +11,10 @@ export interface Chat {
   editPost(postId: string, message: string): Promise<void>;
   /** Channel holding a post, or null if the post is gone. */
   postChannel(postId: string): Promise<string | null>;
+  /** Whether a custom emoji of that name exists. */
+  emojiExists(name: string): Promise<boolean>;
+  /** Creates a custom emoji from a PNG image. */
+  createEmoji(name: string, png: Uint8Array<ArrayBuffer>): Promise<void>;
 }
 
 /** Minimal kChat (Mattermost API v4) client acting as the bot account. */
@@ -68,5 +72,30 @@ export class KChat implements Chat {
       if (err instanceof HttpError && (err.status === 404 || err.status === 403)) throw new PostMissingError(postId);
       throw err;
     }
+  }
+
+  async emojiExists(name: string): Promise<boolean> {
+    try {
+      await this.request("GET", `/emoji/name/${encodeURIComponent(name)}`);
+      return true;
+    } catch (err) {
+      // 501: custom emojis are disabled on the server.
+      if (err instanceof HttpError && (err.status === 404 || err.status === 501)) return false;
+      throw err;
+    }
+  }
+
+  /** Created in the bot's name, which needs the permission to create emojis. */
+  async createEmoji(name: string, png: Uint8Array<ArrayBuffer>): Promise<void> {
+    const me = await this.request<{ id: string }>("GET", "/users/me");
+    const form = new FormData();
+    form.append("emoji", JSON.stringify({ name, creator_id: me.id }));
+    form.append("image", new Blob([png], { type: "image/png" }), `${name}.png`);
+    // No Content-Type: fetch sets the multipart boundary.
+    await fetchJson(`${this.opts.url}/api/v4/emoji`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.opts.token}` },
+      body: form,
+    });
   }
 }
