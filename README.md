@@ -150,7 +150,7 @@ events: { renamed: false }          # default reply events (see config.example.y
 
 With `icons: github`, statuses show GitHub's own octicons (issue opened, closed, not planned, merged PR…) instead of standard emojis. They are custom emojis named `gh-issue-opened`, `gh-git-merge`… (images in `assets/emojis/`). At startup the bot creates those missing from the chat server, which needs custom emojis enabled and the bot allowed to create them. If any of them can be neither found nor created (no permission, kChat emoji quota reached: 10 are needed), every status keeps its standard emoji, with a warning in the logs; the next startup tries again.
 
-Switching icons edits the root posts of open issues at the next startup (an edit, no notification). Replies already posted, and root posts of closed issues until their next event, keep their old icons.
+Switching icons edits every root post at the next startup, closed issues included (an edit, no notification). Replies already posted keep their old icons.
 
 ### Finding the kChat values
 

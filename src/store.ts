@@ -111,16 +111,16 @@ export class Store {
   }
 
   getThread(ref: IssueRef): ThreadRow | null {
-    const row = this.db
-      .prepare(
-        `SELECT repo, issue_number AS issueNumber, channel_id AS channelId, post_id AS postId, state, duplicate_of AS duplicateOf,
-           gone, root_message AS rootMessage, snapshot, history_cursor AS historyCursor, history_done AS historyDone
-         FROM threads WHERE repo = ? AND issue_number = ?`,
-      )
-      .get(key(ref.repo), ref.number) as ThreadRecord | undefined;
-    return row
-      ? { ...row, repo: ref.repo, snapshot: JSON.parse(row.snapshot) as IssueSnapshot, historyDone: row.historyDone === 1 }
-      : null;
+    const row = this.db.prepare(`${THREAD_SELECT} WHERE repo = ? AND issue_number = ?`).get(key(ref.repo), ref.number) as
+      | ThreadRecord
+      | undefined;
+    return row ? toThreadRow(row, ref.repo) : null;
+  }
+
+  /** Every thread of `repo`, by issue number. */
+  threads(repo: string): ThreadRow[] {
+    const rows = this.db.prepare(`${THREAD_SELECT} WHERE repo = ? ORDER BY issue_number`).all(key(repo)) as ThreadRecord[];
+    return rows.map((row) => toThreadRow(row, repo));
   }
 
   saveThread(t: ThreadRow): void {
@@ -206,4 +206,12 @@ export class Store {
   close(): void {
     this.db.close();
   }
+}
+
+const THREAD_SELECT = `SELECT repo, issue_number AS issueNumber, channel_id AS channelId, post_id AS postId, state,
+  duplicate_of AS duplicateOf, gone, root_message AS rootMessage, snapshot, history_cursor AS historyCursor,
+  history_done AS historyDone FROM threads`;
+
+function toThreadRow(row: ThreadRecord, repo: string): ThreadRow {
+  return { ...row, repo, snapshot: JSON.parse(row.snapshot) as IssueSnapshot, historyDone: row.historyDone === 1 };
 }
