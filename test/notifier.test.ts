@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toSnapshot, type GhIssue } from "../src/domain.ts";
 import { resolveIcons } from "../src/icons.ts";
+import { PostMissingError } from "../src/kchat.ts";
 import { MAX_PR_REFS, Notifier } from "../src/notifier.ts";
 import { Store } from "../src/store.ts";
 import { FakeChat, FakeGitHub, fixture, OTHER_REPO, REPO, testConfig, user } from "./helpers.ts";
@@ -206,6 +207,27 @@ describe("reconcile", () => {
     edits.mockClear();
     await notifier.reconcile();
     expect(edits).not.toHaveBeenCalled();
+  });
+
+  it("skips roots it cannot redraw and keeps going", async () => {
+    await notifier.reconcile();
+    github.addIssue(toSnapshot(issue1202));
+    github.issues.delete(1201);
+    await notifier.reconcile();
+    const [r1201, r1202] = chat.roots();
+    const icons = await resolveIcons("github", chat, () => new Uint8Array(1));
+    notifier = new Notifier(testConfig(), store, chat, github, { icons, historyDelayMs: 0 });
+    vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const edit = chat.editPost.bind(chat);
+    vi.spyOn(chat, "editPost").mockImplementation(async (id, message) => {
+      if (id === r1201!.id) throw new PostMissingError(id);
+      if (id === r1202!.id) throw new Error("kChat unavailable");
+      return edit(id, message);
+    });
+    await notifier.reconcile();
+    expect(r1201!.message).toContain("🗑️");
+    expect(r1202!.message).toContain("✅");
+    expect(chat.posts.filter((p) => p.rootId)).toEqual([]);
   });
 
   it("leaves closed threads of another channel for their next event", async () => {
