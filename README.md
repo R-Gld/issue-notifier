@@ -198,7 +198,7 @@ CI (`.github/workflows/ci.yml`) runs the typecheck and the tests with coverage o
 git tag -s v1.2.3 -m v1.2.3 && git push origin v1.2.3
 ```
 
-CI publishes `1.2.3`, `1.2` and `latest`. Pull requests only check that the image builds.
+CI publishes `1.2.3`, `1.2` and `latest`, then creates the GitHub release with notes listing the pull requests merged since the previous one (a release written by hand beforehand is kept). Pull requests only check that the image builds.
 
 ## Development
 
