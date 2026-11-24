@@ -15,8 +15,6 @@ describe("root post", () => {
         "#### 🐛 [#1201](https://github.com/acme/widgets/issues/1201) · Crash when adding a second sync folder",
         "Statut : 🟢 Ouverte · Type : Bug · Labels : `bug`",
         "Assignee : @alice.dev · Auteur : **outside-user**",
-        "",
-        "---",
       ].join("\n"),
     );
   });
