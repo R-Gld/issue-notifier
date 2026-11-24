@@ -123,9 +123,7 @@ export class Renderer {
         .map((pr) => `[${prRef(pr, repo)}](${pr.url}) (${this.t.prState[pr.state]})`);
       lines.push(`${field.linkedPrs}${colon}${list.join(", ")}`);
     }
-    // A closing rule separates threads in the channel without being the first thing previews show.
-    // The blank line keeps `---` from turning the last line into a setext heading.
-    return `${lines.join("\n")}\n\n---`;
+    return lines.join("\n");
   }
 
   private status(issue: IssueSnapshot, duplicateOf: number | null, gone: Gone | null): string {

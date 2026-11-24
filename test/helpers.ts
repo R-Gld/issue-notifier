@@ -132,6 +132,17 @@ export class FakeGitHub implements GitHubApi {
     return this.repo(repo).issues.get(number) ?? { kind: "deleted" };
   }
 
+  /** Repositories as GitHub knows them, by the name asked for; unlisted ones exist under that name. */
+  repositories = new Map<string, { id: number; fullName: string } | null>();
+  private readonly ids = new Map<string, number>();
+
+  async repository(repo: string): Promise<{ id: number; fullName: string } | null> {
+    const key = repo.toLowerCase();
+    if (this.repositories.has(key)) return this.repositories.get(key)!;
+    if (!this.ids.has(key)) this.ids.set(key, 1000 + this.ids.size);
+    return { id: this.ids.get(key)!, fullName: repo };
+  }
+
   async listOpenIssues(repo: string): Promise<IssueSnapshot[]> {
     return [...this.repo(repo).issues.values()].flatMap((l) => (l.kind === "issue" && l.issue.state === "open" ? [l.issue] : []));
   }

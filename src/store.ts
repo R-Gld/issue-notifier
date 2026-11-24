@@ -117,6 +117,15 @@ export class Store {
     return row ? toThreadRow(row, ref.repo) : null;
   }
 
+  /** Moves everything recorded under `from` to `to`, after GitHub renamed the repository. */
+  renameRepo(from: string, to: string): void {
+    this.db.transaction(() => {
+      this.db.prepare(`UPDATE threads SET repo = ? WHERE repo = ?`).run(key(to), key(from));
+      this.db.prepare(`UPDATE linked_prs SET repo = ? WHERE repo = ?`).run(key(to), key(from));
+      this.db.prepare(`UPDATE linked_prs SET pr_repo = ? WHERE pr_repo = ?`).run(key(to), key(from));
+    })();
+  }
+
   /** Every thread of `repo`, by issue number. */
   threads(repo: string): ThreadRow[] {
     const rows = this.db.prepare(`${THREAD_SELECT} WHERE repo = ? ORDER BY issue_number`).all(key(repo)) as ThreadRecord[];

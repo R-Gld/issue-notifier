@@ -68,8 +68,6 @@ describe("English rendering", () => {
         "Status: 🟢 Open · Type: Bug · Labels: `bug`",
         "Assignee: @alice.dev · Author: **outside-user**",
         "Linked PRs: [gadgets#7](https://github.com/acme/gadgets/pull/7) (🟣 merged)",
-        "",
-        "---",
       ].join("\n"),
     );
   });

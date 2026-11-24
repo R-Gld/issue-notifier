@@ -59,6 +59,12 @@ interface ApplyOptions {
 }
 
 
+/** The `repository` of a webhook payload. */
+export interface WebhookRepository {
+  id?: number;
+  full_name?: string;
+}
+
 /**
  * Most issues a PR can be linked to, all paths together (body, edits, reconcile). Anyone can open
  * a PR on a public repository: without a cap, a body listing `#1 … #2000` would create (and replay
@@ -110,8 +116,49 @@ export class Notifier {
     return run;
   }
 
+  /**
+   * The configured repository a webhook is about. It is found by name, or by GitHub's id when the
+   * repository was renamed since: its threads then move to the new name.
+   */
+  repoOf(repository: WebhookRepository | undefined): RepoConfig | undefined {
+    const byName = findRepo(this.config, repository?.full_name);
+    if (byName) {
+      if (repository?.id !== undefined) byName.githubId ??= repository.id;
+      return byName;
+    }
+    const byId = repository?.id === undefined ? undefined : this.config.repos.find((r) => r.githubId === repository.id);
+    if (byId && repository?.full_name) this.rename(byId, repository.full_name);
+    return byId;
+  }
+
+  /**
+   * Learns the id of every configured repository and follows renames made while the service was
+   * down. GitHub being unreachable is not fatal: repositories are still matched by name.
+   */
+  async resolveRepos(): Promise<void> {
+    for (const repo of this.config.repos) {
+      try {
+        const found = await this.github.repository(repo.repo);
+        if (!found) {
+          log.error("repository not found on GitHub: check its name in config.yml and GITHUB_TOKEN", { repo: repo.repo });
+          continue;
+        }
+        repo.githubId = found.id;
+        if (found.fullName.toLowerCase() !== repo.repo.toLowerCase()) this.rename(repo, found.fullName);
+      } catch (err) {
+        log.warn("cannot look up repository on GitHub, matching it by name only", { repo: repo.repo, err });
+      }
+    }
+  }
+
+  private rename(repo: RepoConfig, to: string): void {
+    log.warn("repository renamed on GitHub, its threads follow it: update its name in config.yml", { from: repo.repo, to });
+    this.store.renameRepo(repo.repo, to);
+    repo.repo = to;
+  }
+
   async handleEvent(event: string, payload: unknown): Promise<void> {
-    const repo = findRepo(this.config, (payload as { repository?: { full_name?: string } }).repository?.full_name);
+    const repo = this.repoOf((payload as { repository?: WebhookRepository }).repository);
     if (!repo) return log.debug("event from an unconfigured repository", { event });
     switch (event) {
       case "issues":

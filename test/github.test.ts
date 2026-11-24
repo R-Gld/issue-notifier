@@ -31,12 +31,12 @@ const xref = (repo: string, number: number, state: string, merged_at: string | n
 const page = (n: number, make: (i: number) => object) => Array.from({ length: n }, (_, i) => make(i));
 
 describe("GitHub client", () => {
-  const gh = new GitHub([REPO, OTHER_REPO], "ghp_x");
+  const gh = new GitHub(() => [REPO, OTHER_REPO], "ghp_x");
 
   it("authenticates when a token is set, and only then", async () => {
     const { calls } = mockFetch(on("GET", "/issues/1201", { body: { ...issue1201, repository_url: `${API}/repos/${REPO}` } }));
     await gh.getIssue(REPO, 1201);
-    await new GitHub([REPO]).getIssue(REPO, 1201);
+    await new GitHub(() => [REPO]).getIssue(REPO, 1201);
     expect(calls[0]!.headers).toMatchObject({ authorization: "Bearer ghp_x", accept: "application/vnd.github+json" });
     expect(calls[1]!.headers.authorization).toBeUndefined();
   });
@@ -199,7 +199,7 @@ describe("GitHub client", () => {
   describe("duplicateOf", () => {
     it("needs a token and makes no request without one", async () => {
       const { calls } = mockFetch();
-      expect(await new GitHub([REPO]).duplicateOf(REPO, 1)).toBeNull();
+      expect(await new GitHub(() => [REPO]).duplicateOf(REPO, 1)).toBeNull();
       expect(calls).toEqual([]);
     });
 
@@ -221,5 +221,19 @@ describe("GitHub client", () => {
       mockFetch(on("POST", "/graphql", { body: { errors: [{ message: "nope" }] } }));
       expect(await gh.duplicateOf(REPO, 7)).toBeNull();
     });
+  });
+});
+
+describe("GitHub repository lookup", () => {
+  it("returns the id and the current name, following renames", async () => {
+    mockFetch(
+      on("GET", `/repos/${REPO}`, { body: { id: 42, full_name: "acme/widgets-next" } }),
+      on("GET", "/repos/acme/gone", { status: 404 }),
+      on("GET", "/repos/acme/secret", { status: 403 }),
+    );
+    const gh = new GitHub(() => [REPO]);
+    expect(await gh.repository(REPO)).toEqual({ id: 42, fullName: "acme/widgets-next" });
+    expect(await gh.repository("acme/gone")).toBeNull();
+    await expect(gh.repository("acme/secret")).rejects.toThrow();
   });
 });
