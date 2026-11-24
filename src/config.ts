@@ -100,6 +100,8 @@ export interface RepoConfig {
   events: Record<ReplyEvent, boolean>;
   /** The channel also receives other repositories: thread titles name the repository. */
   sharedChannel: boolean;
+  /** GitHub's id of the repository, once known: it survives renames. */
+  githubId?: number;
 }
 
 export interface Config {

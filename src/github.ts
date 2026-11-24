@@ -8,6 +8,8 @@ export type IssueLookup =
   | { kind: "deleted" };
 
 export interface GitHubApi {
+  /** Id and current name of a repository, following renames; null if it is missing or hidden. */
+  repository(repo: string): Promise<{ id: number; fullName: string } | null>;
   getIssue(repo: string, number: number): Promise<IssueLookup>;
   listOpenIssues(repo: string): Promise<IssueSnapshot[]>;
   /** PRs of the configured repositories that reference the issue, from its timeline. */
@@ -48,9 +50,9 @@ interface GhTimelineEvent {
 export class GitHub implements GitHubApi {
   private readonly base = "https://api.github.com";
 
-  /** PRs are only linked when they belong to one of `repos`. */
+  /** PRs are only linked when they belong to one of `repos`, read on each use: a rename updates it. */
   constructor(
-    private readonly repos: readonly string[],
+    private readonly repos: () => readonly string[],
     private readonly token?: string,
   ) {}
 
@@ -65,6 +67,17 @@ export class GitHub implements GitHubApi {
 
   private get<T>(path: string, init: RequestInit = {}): Promise<T> {
     return fetchJson<T>(`${this.base}${path}`, { ...init, headers: this.headers() });
+  }
+
+  async repository(repo: string): Promise<{ id: number; fullName: string } | null> {
+    try {
+      // GitHub redirects a renamed repository to its new name.
+      const r = await this.get<{ id: number; full_name: string }>(`/repos/${repo}`);
+      return { id: r.id, fullName: r.full_name };
+    } catch (err) {
+      if (err instanceof HttpError && err.status === 404) return null;
+      throw err;
+    }
   }
 
   async getIssue(repo: string, number: number): Promise<IssueLookup> {
@@ -107,7 +120,7 @@ export class GitHub implements GitHubApi {
     const src = e.source?.issue;
     if (e.event !== "cross-referenced" || !src?.pull_request) return null;
     const name = src.repository?.full_name.toLowerCase();
-    const repo = this.repos.find((r) => r.toLowerCase() === name);
+    const repo = this.repos().find((r) => r.toLowerCase() === name);
     if (!repo) return null;
     return {
       repo,

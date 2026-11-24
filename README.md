@@ -22,7 +22,7 @@ kChat is built on Mattermost and this service only uses the Mattermost API v4, s
 
 ### Rendering rules
 
-- Root post: the title as a `####` heading linking to the issue, followed by the status, type, labels, assignees, author and linked PRs, and a closing horizontal rule that separates threads in the channel. In a channel shared by several repositories, the title names the repository (`gadgets#12` instead of `#12`).
+- Root post: the title as a `####` heading linking to the issue, followed by the status, type, labels, assignees, author and linked PRs. In a channel shared by several repositories, the title names the repository (`gadgets#12` instead of `#12`).
 - **No links in replies**: kChat shows a preview of the last link of every post, which would clutter threads. Users are rendered in **bold** without a link, and URLs in comment excerpts are wrapped in backticks. Images become `🖼️ `url``.
 - **No accidental mentions**: every `@` coming from GitHub (comments, titles, labels) is neutralized with an invisible character. Only the bot creates mentions.
 
@@ -182,9 +182,10 @@ A repository posts into exactly one channel. Data written before multi-repositor
 - State (issue → thread mapping, linked PRs, history progress) lives in the `data` Docker volume.
 - **Adding a repository**: add it to `repos`, add the bot to its channel, create its webhook, then `docker compose restart`. Its open issues get threads right away.
 - **Moving a repository to another channel**: change its `channel` and restart. Its threads are recreated in the new channel, with their history: open issues right away, others on their next event. Old threads stay where they are; other repositories are not affected.
+- **Renaming a repository** (or moving it to another owner) on GitHub: nothing to do right away. The service recognises it by GitHub's id, at startup or on its next webhook, and its threads follow the new name; a warning asks to update its name in `config.yml` (until then, each startup follows GitHub's redirect).
 - **Removing a repository**: remove it from `repos` and delete its webhook. Its threads stay in the channel and are no longer updated.
 - Logs: `docker compose logs -f`, rotated at 3 × 10 MB. Set `DEBUG=1` in `.env` for debug logs.
-- Bot avatar: `deploy/bot-avatar.png` (the GitHub mark). A bot cannot change its own picture; set it from the bot owner's account.
+- Bot avatar: `deploy/bot-avatar.png` (the GitHub mark on an opaque white background, readable in light and dark themes). A bot cannot change its own picture; set it from the bot owner's account (Integrations → Bot accounts → edit the bot).
 
 ### Translations
 

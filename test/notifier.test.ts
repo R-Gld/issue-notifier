@@ -765,3 +765,54 @@ describe("security regressions, second audit", () => {
     expect(chat.roots()[0]!.message).toContain("➡️ Transférée");
   });
 });
+
+describe("repository renames", () => {
+  const NEW = "acme/widgets-next";
+  const event = (repository: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    notifier.handleEvent("issues", { action: "labeled", issue: issue1201, label: { name: "bug" }, sender: user("rob-dev"), repository, ...extra });
+
+  beforeEach(() => vi.spyOn(process.stderr, "write").mockReturnValue(true));
+
+  it("follows a rename made while the service was down, without marking issues transferred", async () => {
+    store.upsertLinkedPr({ repo: REPO, number: 1201 }, { repo: REPO, number: 1210, title: "fix", url: "u", state: "open" });
+    await notifier.reconcile();
+    const roots = chat.roots().length;
+
+    github.repositories.set(REPO, { id: 42, fullName: NEW });
+    github.addIssue(toSnapshot({ ...issue1201, html_url: `https://github.com/${NEW}/issues/1201` }), NEW);
+    github.addIssue(toSnapshot({ ...issue1202, state: "open", state_reason: null }), NEW);
+    await notifier.resolveRepos();
+    expect(notifier.repoOf({ full_name: NEW })?.repo).toBe(NEW);
+    expect(store.getThread({ repo: NEW, number: 1201 })).not.toBeNull();
+    expect(store.getThread({ repo: REPO, number: 1201 })).toBeNull();
+    expect(store.linkedPrs({ repo: NEW, number: 1201 }).map((p) => p.repo.toLowerCase())).toEqual([NEW]);
+
+    await notifier.reconcile();
+    expect(chat.roots()).toHaveLength(roots);
+    expect(chat.roots().map((p) => p.message).join("\n")).not.toMatch(/Transférée|Supprimée/);
+  });
+
+  it("follows a rename announced by a webhook, once the repository's id is known", async () => {
+    await event({ id: 42, full_name: REPO });
+    const root = chat.roots()[0]!;
+    await event({ id: 42, full_name: NEW });
+    expect(chat.roots()).toEqual([root]);
+    expect(notifier.repoOf({ full_name: NEW })?.githubId).toBe(42);
+    expect(notifier.repoOf({ full_name: REPO })).toBeUndefined();
+  });
+
+  it("ignores an unknown repository, by name and by id", async () => {
+    await event({ id: 42, full_name: REPO });
+    expect(notifier.repoOf({ id: 7, full_name: "acme/other" })).toBeUndefined();
+    expect(notifier.repoOf({ full_name: "acme/other" })).toBeUndefined();
+    expect(notifier.repoOf(undefined)).toBeUndefined();
+  });
+
+  it("keeps matching by name when GitHub cannot tell", async () => {
+    github.repositories.set(REPO, null);
+    await notifier.resolveRepos();
+    vi.spyOn(github, "repository").mockRejectedValue(new Error("GitHub down"));
+    await notifier.resolveRepos();
+    expect(notifier.repoOf({ full_name: REPO })?.repo).toBe(REPO);
+  });
+});

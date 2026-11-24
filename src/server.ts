@@ -1,7 +1,7 @@
 import { verify } from "@octokit/webhooks-methods";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { log } from "./log.ts";
-import type { Notifier } from "./notifier.ts";
+import type { Notifier, WebhookRepository } from "./notifier.ts";
 import type { Store } from "./store.ts";
 
 const MAX_BODY = 5 * 1024 * 1024;
@@ -22,8 +22,7 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-export function createApp(deps: { secret: string; repos: readonly string[]; notifier: Notifier; store: Store }): Server {
-  const repos = new Set(deps.repos.map((r) => r.toLowerCase()));
+export function createApp(deps: { secret: string; notifier: Notifier; store: Store }): Server {
   return createServer(async (req, res) => {
     const send = (status: number, body: string) => res.writeHead(status, { "Content-Type": "text/plain" }).end(body);
     const path = (req.url ?? "/").split("?")[0];
@@ -54,13 +53,13 @@ export function createApp(deps: { secret: string; repos: readonly string[]; noti
       return send(200, "pong");
     }
 
-    let payload: { repository?: { full_name?: string } };
+    let payload: { repository?: WebhookRepository };
     try {
       payload = JSON.parse(body);
     } catch {
       return send(400, "invalid json");
     }
-    if (!repos.has(payload.repository?.full_name?.toLowerCase() ?? "")) return send(202, "ignored repository");
+    if (!deps.notifier.repoOf(payload.repository)) return send(202, "ignored repository");
     if (delivery && !deps.store.markDelivery(delivery)) return send(200, "duplicate delivery");
 
     log.info("webhook received", {

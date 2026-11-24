@@ -18,7 +18,7 @@ beforeEach(async () => {
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
   store = new Store(":memory:");
   notifier = new Notifier(testConfig(), store, chat, new FakeGitHub(), { historyDelayMs: 0 });
-  const server = createApp({ secret: SECRET, repos: [REPO], notifier, store });
+  const server = createApp({ secret: SECRET, notifier, store });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   close = () => server.close();
@@ -67,6 +67,14 @@ describe("webhook endpoint", () => {
     expect((await deliver({ ...opened, repository: { full_name: "other/repo" } })).status).toBe(202);
     await settle();
     expect(chat.posts).toEqual([]);
+  });
+
+  it("accepts events of a repository renamed since its id was learned", async () => {
+    expect((await deliver({ ...opened, repository: { id: 42, full_name: REPO } })).status).toBe(202);
+    expect((await deliver({ ...opened, repository: { id: 42, full_name: "acme/renamed" } })).status).toBe(202);
+    expect((await deliver({ ...opened, repository: { id: 7, full_name: "acme/unknown" } })).status).toBe(202);
+    await settle();
+    expect(chat.roots()).toHaveLength(1);
   });
 
   it("only serves the webhook and health endpoints", async () => {

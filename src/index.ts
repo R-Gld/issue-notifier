@@ -13,11 +13,12 @@ const config = loadConfig();
 const store = new Store(config.dbPath, config.repos[0]!.repo);
 const kchat = new KChat(config.kchat);
 const github = new GitHub(
-  config.repos.map((r) => r.repo),
+  () => config.repos.map((r) => r.repo),
   config.github.token,
 );
 const icons = await resolveIcons(config.icons, kchat);
 const notifier = new Notifier(config, store, kchat, github, { icons });
+await notifier.resolveRepos();
 
 // Fail fast on a wrong team/channel or token.
 for (const { repo, kchatTeam, channel } of config.repos) {
@@ -35,7 +36,6 @@ for (const { repo, kchatTeam, channel } of config.repos) {
 
 const server = createApp({
   secret: config.github.webhookSecret,
-  repos: config.repos.map((r) => r.repo),
   notifier,
   store,
 });
