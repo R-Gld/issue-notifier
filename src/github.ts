@@ -12,10 +12,14 @@ export interface GitHubApi {
   repository(repo: string): Promise<{ id: number; fullName: string } | null>;
   getIssue(repo: string, number: number): Promise<IssueLookup>;
   listOpenIssues(repo: string): Promise<IssueSnapshot[]>;
+  /** Issues of any state updated at or after `since` (pull requests excluded). */
+  listUpdatedIssues(repo: string, since: string): Promise<IssueSnapshot[]>;
   /** PRs of the configured repositories that reference the issue, from its timeline. */
   linkedPrs(repo: string, number: number): Promise<LinkedPr[]>;
   /** Comments and events of the issue, oldest first, bots excluded. */
   history(repo: string, number: number): Promise<HistoryEvent[]>;
+  /** Who opened a pull request, and who closed or merged it, for replies built without a webhook. */
+  pullRequestPeople(repo: string, number: number): Promise<{ author: string; closedBy: string | null }>;
   /** Canonical issue of an issue closed as duplicate, if GitHub knows it. */
   duplicateOf(repo: string, number: number): Promise<number | null>;
 }
@@ -97,6 +101,23 @@ export class GitHub implements GitHubApi {
     const out: IssueSnapshot[] = [];
     for (let page = 1; ; page++) {
       const batch = await this.get<GhIssue[]>(`/repos/${repo}/issues?state=open&per_page=100&page=${page}`);
+      out.push(...batch.filter((i) => !i.pull_request).map(toSnapshot));
+      if (batch.length < 100) return out;
+    }
+  }
+
+  async pullRequestPeople(repo: string, number: number): Promise<{ author: string; closedBy: string | null }> {
+    // The issues API also serves pull requests, with `closed_by` set for merges too.
+    const pr = await this.get<{ user: GhActor; closed_by?: GhActor | null }>(`/repos/${repo}/issues/${number}`);
+    return { author: pr.user.login, closedBy: pr.closed_by?.login ?? null };
+  }
+
+  async listUpdatedIssues(repo: string, since: string): Promise<IssueSnapshot[]> {
+    const out: IssueSnapshot[] = [];
+    for (let page = 1; ; page++) {
+      const batch = await this.get<GhIssue[]>(
+        `/repos/${repo}/issues?state=all&since=${encodeURIComponent(since)}&sort=updated&direction=asc&per_page=100&page=${page}`,
+      );
       out.push(...batch.filter((i) => !i.pull_request).map(toSnapshot));
       if (batch.length < 100) return out;
     }

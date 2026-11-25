@@ -64,6 +64,17 @@ export class Store {
         PRIMARY KEY (repo, issue_number, pr_repo, pr_number)
       );
       CREATE INDEX IF NOT EXISTS linked_prs_by_pr ON linked_prs (pr_repo, pr_number);
+      CREATE TABLE IF NOT EXISTS posted (
+        repo TEXT NOT NULL,
+        issue_number INTEGER NOT NULL,
+        fingerprint TEXT NOT NULL,
+        at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS posted_by_issue ON posted (repo, issue_number, fingerprint);
+      CREATE TABLE IF NOT EXISTS repo_sync (
+        repo TEXT PRIMARY KEY,
+        synced_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS deliveries (
         id TEXT PRIMARY KEY,
         received_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -123,7 +134,40 @@ export class Store {
       this.db.prepare(`UPDATE threads SET repo = ? WHERE repo = ?`).run(key(to), key(from));
       this.db.prepare(`UPDATE linked_prs SET repo = ? WHERE repo = ?`).run(key(to), key(from));
       this.db.prepare(`UPDATE linked_prs SET pr_repo = ? WHERE pr_repo = ?`).run(key(to), key(from));
+      this.db.prepare(`UPDATE posted SET repo = ? WHERE repo = ?`).run(key(to), key(from));
+      this.db.prepare(`UPDATE repo_sync SET repo = ? WHERE repo = ?`).run(key(to), key(from));
     })();
+  }
+
+  /** Records a reply posted in an issue's thread, so the same event is never posted twice. */
+  recordPosted(ref: IssueRef, fingerprint: string, at: string): void {
+    this.db.prepare(`INSERT INTO posted (repo, issue_number, fingerprint, at) VALUES (?, ?, ?, ?)`).run(key(ref.repo), ref.number, fingerprint, at);
+  }
+
+  /** Whether a reply with that fingerprint was posted for an event at most `windowMs` away from `at`. */
+  wasPosted(ref: IssueRef, fingerprint: string, at: string, windowMs: number): boolean {
+    const rows = this.db
+      .prepare(`SELECT at FROM posted WHERE repo = ? AND issue_number = ? AND fingerprint = ?`)
+      .all(key(ref.repo), ref.number, fingerprint) as Array<{ at: string }>;
+    const t = Date.parse(at);
+    return rows.some((r) => Math.abs(Date.parse(r.at) - t) <= windowMs);
+  }
+
+  /** Forgets posted replies older than `before`: the catch-up never looks that far back. */
+  prunePosted(before: string): void {
+    this.db.prepare(`DELETE FROM posted WHERE at < ?`).run(before);
+  }
+
+  /** When the last successful reconcile of `repo` started, or null before the first one. */
+  repoSyncedAt(repo: string): string | null {
+    const row = this.db.prepare(`SELECT synced_at AS at FROM repo_sync WHERE repo = ?`).get(key(repo)) as { at: string } | undefined;
+    return row?.at ?? null;
+  }
+
+  setRepoSyncedAt(repo: string, at: string): void {
+    this.db
+      .prepare(`INSERT INTO repo_sync (repo, synced_at) VALUES (?, ?) ON CONFLICT (repo) DO UPDATE SET synced_at = excluded.synced_at`)
+      .run(key(repo), at);
   }
 
   /** Every thread of `repo`, by issue number. */

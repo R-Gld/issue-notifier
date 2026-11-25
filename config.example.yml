@@ -59,7 +59,8 @@ events:
 comments:
   excerptLength: 300
 
-# Recreates missing threads and refreshes root posts (also runs at startup).
+# Recreates missing threads, refreshes root posts and posts what happened since its previous
+# run that no webhook reported (also runs at startup). Without webhooks, run it hourly: "0 * * * *".
 reconcile:
   cron: "0 6 * * *"
   timezone: Europe/Zurich

@@ -816,3 +816,126 @@ describe("repository renames", () => {
     expect(notifier.repoOf({ full_name: REPO })?.repo).toBe(REPO);
   });
 });
+
+describe("catch-up without webhooks", () => {
+  const soon = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+  /** Issue 1201 as GitHub shows it after some activity at `at`. */
+  const touch = (at: string, extra: Partial<GhIssue> = {}) => github.addIssue(toSnapshot({ ...issue1201, updated_at: at, ...extra }));
+  const root1201 = () => chat.roots().find((p) => p.message.includes("#1201"))!;
+
+  beforeEach(() => vi.spyOn(process.stderr, "write").mockReturnValue(true));
+
+  it("posts what happened since the previous run, once, as dated replies", async () => {
+    await notifier.reconcile(); // first run: threads and history, then the mark
+    expect(chat.posts.filter((p) => p.rootId)).toEqual([]);
+
+    const at = soon(1);
+    github.histories.set(1201, [
+      { at, actor: "outside-user", kind: "commented", body: "Still broken", url: "https://github.com/acme/widgets/issues/1201#c9" },
+      { at, actor: "rob-dev", kind: "assigned", assignee: "alice-dev" },
+      { at, actor: "rob-dev", kind: "labeled", label: "linux" }, // labeled replies are off
+    ]);
+    touch(at, { assignees: [{ login: "alice-dev" }] } as Partial<GhIssue>);
+    await notifier.reconcile();
+    const replies = chat.replies(root1201().id);
+    expect(replies).toHaveLength(2);
+    expect(replies[0]).toMatch(/^🕰️ .*\n💬 \*\*outside-user\*\* a commenté :\n> Still broken/);
+    expect(replies[1]).toContain("@alice.dev"); // live mention, as a webhook would
+    expect(root1201().message).toContain("@alice.dev");
+
+    await notifier.reconcile();
+    expect(chat.replies(root1201().id)).toHaveLength(2);
+  });
+
+  it("does not post again what a webhook already posted", async () => {
+    await notifier.reconcile();
+    const at = soon(1);
+    await notifier.handleEvent("issue_comment", {
+      action: "created",
+      issue: { ...issue1201, updated_at: at },
+      comment: { body: "Live", html_url: "https://github.com/acme/widgets/issues/1201#c10", user: user("outside-user"), created_at: at },
+      sender: user("outside-user"),
+      repository,
+    });
+    await issues("closed", { ...issue1201, state: "closed", state_reason: "completed", updated_at: soon(2) });
+    github.histories.set(1201, [
+      { at, actor: "outside-user", kind: "commented", body: "Live", url: "https://github.com/acme/widgets/issues/1201#c10" },
+      // The timeline dates the closing a few seconds after the webhook did.
+      { at: soon(2.05), actor: "rob-dev", kind: "closed", stateReason: "completed" },
+    ]);
+    touch(soon(2), { state: "closed", state_reason: "completed" } as Partial<GhIssue>);
+    await notifier.reconcile();
+    expect(chat.replies(root1201().id)).toHaveLength(2);
+  });
+
+  it("reports linked PRs from their state, with who opened, merged or closed them", async () => {
+    await notifier.reconcile();
+    const pr = { repo: REPO, number: 1210, title: "fix", url: "https://github.com/acme/widgets/pull/1210" };
+    github.prs.set(1201, [{ ...pr, state: "open" }]);
+    touch(soon(1));
+    await notifier.reconcile();
+    expect(chat.replies(root1201().id)).toEqual([expect.stringMatching(/PR liée : #1210 fix par \*\*pr-author\*\*/)]);
+
+    github.prs.set(1201, [{ ...pr, state: "merged" }]);
+    github.prPeople.set(`${REPO}#1210`, { author: "pr-author", closedBy: "alice-dev" });
+    touch(soon(2));
+    await notifier.reconcile();
+    expect(chat.replies(root1201().id)[1]).toMatch(/PR #1210 mergée par \*\*alice-dev\*\*/);
+
+    github.prs.set(1201, [{ ...pr, state: "closed" }]);
+    github.prPeople.set(`${REPO}#1210`, { author: "pr-author", closedBy: null });
+    touch(soon(3));
+    await notifier.reconcile();
+    expect(chat.replies(root1201().id)[2]).toMatch(/PR #1210 fermée sans merge par \*\*pr-author\*\*/);
+
+    github.prs.set(1201, [{ ...pr, state: "open" }]); // reopened: the webhook says nothing either
+    touch(soon(4));
+    await notifier.reconcile();
+    expect(chat.replies(root1201().id)).toHaveLength(3);
+  });
+
+  it("opens a thread for a closed issue that got activity, like its webhook would", async () => {
+    await notifier.reconcile();
+    github.addIssue(toSnapshot({ ...issue1201, number: 1300, state: "closed", state_reason: "completed", updated_at: soon(1) }));
+    await notifier.reconcile();
+    expect(chat.roots().some((p) => p.message.includes("#1300"))).toBe(true);
+  });
+
+  it("only rescans the linked PRs of untouched issues once in a while", async () => {
+    await notifier.reconcile();
+    const scans = vi.spyOn(github, "linkedPrs");
+    await notifier.reconcile();
+    expect(scans).not.toHaveBeenCalled();
+
+    touch(soon(1));
+    await notifier.reconcile();
+    expect(scans.mock.calls.map((c) => c[1])).toEqual([1201]);
+  });
+
+  it("keeps the mark when a repository fails, to catch up next time", async () => {
+    await notifier.reconcile();
+    const mark = store.repoSyncedAt(REPO);
+    vi.spyOn(github, "listOpenIssues").mockRejectedValueOnce(new Error("GitHub down"));
+    await notifier.reconcile();
+    expect(store.repoSyncedAt(REPO)).toBe(mark);
+  });
+});
+
+describe("posted events store", () => {
+  it("matches an event within the window, forgets old ones and follows renames", () => {
+    const s = new Store(":memory:");
+    const ref = { repo: REPO, number: 1 };
+    s.recordPosted(ref, "closed|rob-dev", "2026-11-01T10:00:00Z");
+    expect(s.wasPosted(ref, "closed|rob-dev", "2026-11-01T10:05:00Z", 600_000)).toBe(true);
+    expect(s.wasPosted(ref, "closed|rob-dev", "2026-11-01T10:20:00Z", 600_000)).toBe(false);
+    expect(s.wasPosted(ref, "reopened|rob-dev", "2026-11-01T10:00:00Z", 600_000)).toBe(false);
+
+    s.setRepoSyncedAt(REPO, "2026-11-01T11:00:00Z");
+    s.renameRepo(REPO, "acme/next");
+    expect(s.repoSyncedAt("acme/next")).toBe("2026-11-01T11:00:00Z");
+    expect(s.wasPosted({ repo: "acme/next", number: 1 }, "closed|rob-dev", "2026-11-01T10:00:00Z", 0)).toBe(true);
+
+    s.prunePosted("2026-11-02T00:00:00Z");
+    expect(s.wasPosted({ repo: "acme/next", number: 1 }, "closed|rob-dev", "2026-11-01T10:00:00Z", 0)).toBe(false);
+  });
+});

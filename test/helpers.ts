@@ -147,6 +147,19 @@ export class FakeGitHub implements GitHubApi {
     return [...this.repo(repo).issues.values()].flatMap((l) => (l.kind === "issue" && l.issue.state === "open" ? [l.issue] : []));
   }
 
+  /** People of pull requests, by `repo#number`; unlisted ones were opened by pr-author and closed by rob-dev. */
+  prPeople = new Map<string, { author: string; closedBy: string | null }>();
+
+  async pullRequestPeople(repo: string, number: number): Promise<{ author: string; closedBy: string | null }> {
+    return this.prPeople.get(`${repo.toLowerCase()}#${number}`) ?? { author: "pr-author", closedBy: "rob-dev" };
+  }
+
+  async listUpdatedIssues(repo: string, since: string): Promise<IssueSnapshot[]> {
+    return [...this.repo(repo).issues.values()].flatMap((l) =>
+      l.kind === "issue" && (l.issue.updatedAt ?? "") >= since ? [l.issue] : [],
+    );
+  }
+
   async linkedPrs(repo: string, number: number): Promise<LinkedPr[]> {
     return this.repo(repo).prs.get(number) ?? [];
   }
