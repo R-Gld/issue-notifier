@@ -40,6 +40,12 @@ describe("config", () => {
     expect(config.repos.map((r) => r.sharedChannel)).toEqual([true, true, false]);
   });
 
+  it("runs without webhooks when no secret is set", () => {
+    const file = { kchat: { url: "https://chat.example.com", team: "acme" }, repos: [{ repo: REPO, channel: "c" }] };
+    expect(buildConfig(file, { KCHAT_TOKEN: "t" }).github.webhookSecret).toBeUndefined();
+    expect(buildConfig(file, { KCHAT_TOKEN: "t", GITHUB_WEBHOOK_SECRET: "" }).github.webhookSecret).toBeUndefined();
+  });
+
   it("rejects an empty or duplicated repository list", () => {
     expect(() => testConfig({ repos: [] })).toThrow();
     expect(() => testConfig({ repos: [{ repo: REPO, channel: "a" }, { repo: REPO.toUpperCase(), channel: "b" }] })).toThrow(
@@ -62,13 +68,12 @@ describe("config", () => {
     expect(config.repos[0]!.events.commented).toBe(true);
   });
 
-  it("rejects invalid repositories, events and missing secrets", () => {
+  it("rejects invalid repositories, events and a missing chat token", () => {
     expect(() => testConfig({ repos: [{ repo: "not-a-repo", channel: "a" }] })).toThrow(/owner\/name/);
     expect(() => testConfig({ repos: [{ repo: REPO, channel: "" }] })).toThrow();
     expect(() => testConfig({ events: { typo: true } })).toThrow();
     const file = { kchat: { url: "https://c.example", team: "t" }, repos: [{ repo: REPO, channel: "c" }] };
     expect(() => buildConfig(file, { GITHUB_WEBHOOK_SECRET: "s" })).toThrow(/KCHAT_TOKEN/);
-    expect(() => buildConfig(file, { KCHAT_TOKEN: "t" })).toThrow(/GITHUB_WEBHOOK_SECRET/);
     expect(buildConfig(file, { KCHAT_TOKEN: "t", GITHUB_WEBHOOK_SECRET: "s", GITHUB_TOKEN: "" }).github.token).toBeUndefined();
   });
 

@@ -1,5 +1,5 @@
 import { findRepo, type Config, type RepoConfig, type ReplyEvent } from "./config.ts";
-import { isBot, toSnapshot, type GhIssue, type Gone, type IssueRef, type IssueSnapshot, type LinkedPr } from "./domain.ts";
+import { fingerprint, isBot, toSnapshot, type GhIssue, type Gone, type HistoryEvent, type IssueRef, type IssueSnapshot, type LinkedPr } from "./domain.ts";
 import type { GitHubApi } from "./github.ts";
 import type { Locale } from "./i18n.ts";
 import type { Icons } from "./icons.ts";
@@ -50,8 +50,17 @@ interface PullRequestPayload {
   repository?: { full_name: string };
 }
 
+interface Reply {
+  event: ReplyEvent;
+  message: string;
+  /** The event the reply reports, when it can also come from another source: it is posted once. */
+  seen?: HistoryEvent;
+}
+
 interface ApplyOptions {
-  reply?: { event: ReplyEvent; message: string } | null;
+  reply?: Reply | null;
+  /** More replies, posted after `reply`, in order. */
+  replies?: Reply[];
   duplicateOf?: number | null;
   gone?: Gone | null;
   /** Only replay history strictly older than this, so the triggering event isn't posted twice. */
@@ -72,9 +81,20 @@ export interface WebhookRepository {
  */
 export const MAX_PR_REFS = 10;
 
+/** A webhook and the issue timeline may date the same event a few seconds apart. */
+const SAME_EVENT_WINDOW_MS = 10 * 60_000;
+/** The catch-up also rereads this much before the last reconcile, in case of clock skew. */
+const CATCH_UP_OVERLAP_MS = 10 * 60_000;
+/** Linked PRs of issues nobody touched are rescanned this often (PRs linked from the sidebar). */
+const FULL_SCAN_EVERY_MS = 20 * 3_600_000;
+/** Posted fingerprints older than this are forgotten. */
+const POSTED_RETENTION_MS = 30 * 24 * 3_600_000;
+
 export class Notifier {
   /** Per locale: the live renderer, and one without team mapping for history, which never mentions anyone. */
   private readonly renderers = new Map<Locale, { live: Renderer; quiet: Renderer }>();
+  /** When each repository's linked PRs were last scanned in full. */
+  private readonly fullScans = new WeakMap<RepoConfig, number>();
   private queue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -179,37 +199,56 @@ export class Notifier {
     const r = this.renderer(repo);
     const apply = (opts: ApplyOptions = {}): Promise<void> =>
       this.apply(repo, issue, { historyBefore: p.issue.updated_at ?? p.issue.created_at, ...opts });
+    // The time of the change, for the catch-up not to post it again.
+    const base = { at: p.issue.updated_at ?? new Date().toISOString(), actor };
 
     switch (p.action) {
       case "opened":
       case "edited":
         if (p.action === "edited" && p.changes?.title)
-          return apply({ reply: { event: "renamed", message: r.renamed(p.changes.title.from, issue.title, actor) } });
+          return apply({
+            reply: {
+              event: "renamed",
+              message: r.renamed(p.changes.title.from, issue.title, actor),
+              seen: { ...base, kind: "renamed", from: p.changes.title.from, to: issue.title },
+            },
+          });
         return apply();
       case "assigned":
       case "unassigned": {
         const who = p.assignee?.login;
         if (!who) return apply();
         const message = p.action === "assigned" ? r.assigned(who, actor) : r.unassigned(who, actor);
-        return apply({ reply: { event: p.action, message } });
+        return apply({ reply: { event: p.action, message, seen: { ...base, kind: p.action, assignee: who } } });
       }
       case "labeled":
       case "unlabeled":
         return apply({
-          reply: p.label ? { event: p.action, message: r.labeled(p.label.name, p.action === "labeled", actor) } : null,
+          reply: p.label
+            ? {
+                event: p.action,
+                message: r.labeled(p.label.name, p.action === "labeled", actor),
+                seen: { ...base, kind: p.action, label: p.label.name },
+              }
+            : null,
         });
       case "typed":
       case "untyped":
-        return apply({ reply: { event: "typed", message: r.typed(issue.type, actor) } });
+        return apply({ reply: { event: "typed", message: r.typed(issue.type, actor), seen: { ...base, kind: "typed", type: issue.type } } });
       case "milestoned":
       case "demilestoned":
-        return apply({ reply: { event: "milestoned", message: r.milestoned(issue.milestone, actor) } });
+        return apply({
+          reply: { event: "milestoned", message: r.milestoned(issue.milestone, actor), seen: { ...base, kind: "milestoned", milestone: issue.milestone } },
+        });
       case "closed": {
         const duplicateOf = issue.stateReason === "duplicate" ? await this.findDuplicate(repo, issue.number) : null;
-        return apply({ duplicateOf, reply: { event: "closed", message: r.closed(issue, actor, duplicateOf) } });
+        return apply({
+          duplicateOf,
+          reply: { event: "closed", message: r.closed(issue, actor, duplicateOf), seen: { ...base, kind: "closed", stateReason: issue.stateReason } },
+        });
       }
       case "reopened":
-        return apply({ reply: { event: "reopened", message: r.reopened(actor) } });
+        return apply({ reply: { event: "reopened", message: r.reopened(actor), seen: { ...base, kind: "reopened" } } });
       case "transferred": {
         const target = p.changes?.new_repository?.full_name ?? null;
         // An issue that never had a thread does not get one just to say it left.
@@ -233,7 +272,8 @@ export class Notifier {
     if (p.action !== "created" || p.issue.pull_request || isBot(p.comment.user)) return;
     const issue = toSnapshot(p.issue);
     const message = this.renderer(repo).commented(p.comment.user.login, p.comment.body);
-    return this.apply(repo, issue, { historyBefore: p.comment.created_at, reply: { event: "commented", message } });
+    const seen: HistoryEvent = { at: p.comment.created_at ?? new Date().toISOString(), actor: p.comment.user.login, kind: "commented", body: p.comment.body, url: p.comment.html_url };
+    return this.apply(repo, issue, { historyBefore: p.comment.created_at, reply: { event: "commented", message, seen } });
   }
 
   private async onPullRequest(repo: RepoConfig, p: PullRequestPayload): Promise<void> {
@@ -372,19 +412,26 @@ export class Notifier {
     // the history of an issue that left, it could leak the destination's comments here.
     if (!row.historyDone && !gone) await this.replayHistory(repo, issue, channelId, postId, row.historyCursor, opts.historyBefore);
 
-    const reply = opts.reply;
-    if (!reply || !repo.events[reply.event]) return;
-    try {
-      await this.chat.createPost(channelId, reply.message, postId);
-    } catch (err) {
-      if (!(err instanceof PostMissingError)) throw err;
-      const fresh = await this.chat.createPost(channelId, rootMessage);
-      this.store.saveThread({ ...row, postId: fresh, historyCursor: 0, historyDone: false });
-      log.warn("root post was missing, thread recreated", { ...at, postId: fresh });
-      if (!gone) await this.replayHistory(repo, issue, channelId, fresh, 0, opts.historyBefore);
-      await this.chat.createPost(channelId, reply.message, fresh);
+    let replyTo = postId;
+    for (const reply of [...(opts.reply ? [opts.reply] : []), ...(opts.replies ?? [])]) {
+      if (!repo.events[reply.event]) continue;
+      if (reply.seen && this.store.wasPosted(ref, fingerprint(reply.seen), reply.seen.at, SAME_EVENT_WINDOW_MS)) {
+        log.debug("event already posted", { ...at, event: reply.event });
+        continue;
+      }
+      try {
+        await this.chat.createPost(channelId, reply.message, replyTo);
+      } catch (err) {
+        if (!(err instanceof PostMissingError)) throw err;
+        replyTo = await this.chat.createPost(channelId, rootMessage);
+        this.store.saveThread({ ...row, postId: replyTo, historyCursor: 0, historyDone: false });
+        log.warn("root post was missing, thread recreated", { ...at, postId: replyTo });
+        if (!gone) await this.replayHistory(repo, issue, channelId, replyTo, 0, opts.historyBefore);
+        await this.chat.createPost(channelId, reply.message, replyTo);
+      }
+      if (reply.seen) this.store.recordPosted(ref, fingerprint(reply.seen), reply.seen.at);
+      log.info("reply posted", { ...at, event: reply.event });
     }
-    log.info("reply posted", { ...at, event: reply.event });
   }
 
   /**
@@ -403,7 +450,9 @@ export class Notifier {
     try {
       const entries = (await this.github.history(repo.repo, issue.number)).filter((e) => !before || e.at < before);
       for (let i = cursor; i < entries.length; i++) {
-        await this.chat.createPost(channelId, this.renderer(repo, true).historyEntry(entries[i]!, issue, repo.repo), postId);
+        const entry = entries[i]!;
+        await this.chat.createPost(channelId, this.renderer(repo, true).historyEntry(entry, issue, repo.repo), postId);
+        this.store.recordPosted(ref, fingerprint(entry), entry.at);
         this.store.setHistoryProgress(ref, i + 1, false);
         const delay = this.opts.historyDelayMs ?? 150;
         if (delay) await new Promise((r) => setTimeout(r, delay));
@@ -415,22 +464,37 @@ export class Notifier {
     }
   }
 
-  /** Creates missing threads for open issues and refreshes root posts, repository by repository. */
+  /**
+   * Creates missing threads, refreshes root posts and posts what happened since the previous run
+   * (comments, assignments, closings, PRs…) that no webhook reported, repository by repository.
+   */
   async reconcile(): Promise<void> {
     for (const repo of this.config.repos) {
       try {
-        const open = (await this.github.listOpenIssues(repo.repo)).sort((a, b) => a.number - b.number);
-        const openNumbers = new Set(open.map((i) => i.number));
-        const stale = this.store.openThreadNumbers(repo.repo).filter((n) => !openNumbers.has(n));
-        log.info("reconcile started", { repo: repo.repo, open: open.length, stale: stale.length });
+        const started = new Date().toISOString();
+        const since = this.store.repoSyncedAt(repo.repo);
+        // The first run only sets the mark: catching up on everything would flood the channel.
+        const from = since ? new Date(Date.parse(since) - CATCH_UP_OVERLAP_MS).toISOString() : null;
+        const fullScan = !from || Date.now() - (this.fullScans.get(repo) ?? 0) >= FULL_SCAN_EVERY_MS;
 
-        for (const issue of open) await this.syncIssue(repo, issue.number, issue);
-        for (const n of stale) await this.syncIssue(repo, n);
-        await this.refreshRoots(repo, new Set([...openNumbers, ...stale]));
+        const open = await this.github.listOpenIssues(repo.repo);
+        const updated = from ? await this.github.listUpdatedIssues(repo.repo, from) : [];
+        const targets = new Map<number, IssueSnapshot | undefined>(open.map((i) => [i.number, i]));
+        // Threads still shown open whose issue was closed or removed while nobody told us.
+        const stale = this.store.openThreadNumbers(repo.repo).filter((n) => !targets.has(n));
+        for (const n of stale) targets.set(n, undefined);
+        for (const i of updated) targets.set(i.number, i);
+        log.info("reconcile started", { repo: repo.repo, open: open.length, stale: stale.length, updated: updated.length });
+
+        for (const n of [...targets.keys()].sort((a, b) => a - b)) await this.syncIssue(repo, n, targets.get(n), { from, fullScan });
+        await this.refreshRoots(repo, new Set(targets.keys()));
+        if (fullScan) this.fullScans.set(repo, Date.now());
+        this.store.setRepoSyncedAt(repo.repo, started);
       } catch (err) {
         log.error("reconcile failed for repository", { repo: repo.repo, err });
       }
     }
+    this.store.prunePosted(new Date(Date.now() - POSTED_RETENTION_MS).toISOString());
     log.info("reconcile done");
   }
 
@@ -469,7 +533,12 @@ export class Notifier {
     if (edited) log.info("root posts refreshed", { repo: repo.repo, edited });
   }
 
-  private async syncIssue(repo: RepoConfig, number: number, known?: IssueSnapshot): Promise<void> {
+  private async syncIssue(
+    repo: RepoConfig,
+    number: number,
+    known: IssueSnapshot | undefined,
+    opts: { from: string | null; fullScan: boolean },
+  ): Promise<void> {
     const ref = { repo: repo.repo, number };
     try {
       const lookup = known ? ({ kind: "issue", issue: known } as const) : await this.github.getIssue(repo.repo, number);
@@ -480,14 +549,48 @@ export class Notifier {
         return;
       }
       const issue = lookup.issue;
-      for (const pr of await this.github.linkedPrs(repo.repo, number))
-        if (this.admitLink(ref, pr)) this.store.upsertLinkedPr(ref, pr);
       const thread = this.store.getThread(ref);
+      // A thread whose history was fully posted before: what happened since becomes replies.
+      // A new thread gets everything through its history replay instead.
+      const catchUp = opts.from !== null && thread?.historyDone === true && !thread.gone;
+      const touched = opts.from !== null && (issue.updatedAt ?? "") >= opts.from;
+
+      const replies: Reply[] = [];
+      if (catchUp && touched) {
+        const live = this.renderer(repo);
+        for (const e of await this.github.history(repo.repo, number)) {
+          // Linked PRs are reported from their state below, which also covers merges.
+          if (e.at < opts.from! || e.kind === "pr_linked") continue;
+          replies.push({ event: e.kind, message: live.historyEntry(e, issue, repo.repo), seen: e });
+        }
+      }
+      if (!thread || touched || opts.fullScan) {
+        for (const pr of await this.github.linkedPrs(repo.repo, number)) {
+          if (!this.admitLink(ref, pr)) continue;
+          const prev = this.store.upsertLinkedPr(ref, pr);
+          if (catchUp && prev !== pr.state) {
+            const reply = await this.prReply(repo, pr, prev);
+            if (reply) replies.push(reply);
+          }
+        }
+      }
       const duplicateOf =
         issue.stateReason === "duplicate" && !thread?.duplicateOf ? await this.findDuplicate(repo, number) : undefined;
-      await this.apply(repo, issue, { duplicateOf });
+      await this.apply(repo, issue, { duplicateOf, replies });
     } catch (err) {
       log.error("reconcile failed for issue", { repo: repo.repo, issue: number, err });
     }
   }
+
+  /** The reply for a linked PR whose state changed since we last saw it, as its webhook would have. */
+  private async prReply(repo: RepoConfig, pr: LinkedPr, prev: LinkedPr["state"] | null): Promise<Reply | null> {
+    if (pr.state === "open" && prev !== null) return null;
+    const people = await this.github.pullRequestPeople(pr.repo, pr.number);
+    const r = this.renderer(repo);
+    const by = people.closedBy ?? people.author;
+    if (pr.state === "open") return { event: "pr_linked", message: r.prLinked(pr, repo.repo, people.author) };
+    if (pr.state === "merged") return { event: "pr_merged", message: r.prMerged(pr, repo.repo, by) };
+    return { event: "pr_closed", message: r.prClosed(pr, repo.repo, by) };
+  }
+
 }

@@ -237,3 +237,26 @@ describe("GitHub repository lookup", () => {
     await expect(gh.repository("acme/secret")).rejects.toThrow();
   });
 });
+
+describe("GitHub polling helpers", () => {
+  it("lists issues of any state updated since a time, without pull requests", async () => {
+    const page = Array.from({ length: 100 }, (_, i) => ({ ...issue1201, number: i + 1 }));
+    const { calls } = mockFetch(
+      on("GET", "&page=1", { body: [...page.slice(0, 99), { ...issue1201, number: 100, pull_request: {} }] }),
+      on("GET", "&page=2", { body: [{ ...issue1201, number: 101, state: "closed" }] }),
+    );
+    const issues = await new GitHub(() => [REPO]).listUpdatedIssues(REPO, "2026-11-01T10:00:00Z");
+    expect(issues.map((i) => i.number)).toEqual([...page.slice(0, 99).map((i) => i.number), 101]);
+    expect(calls[0]!.url).toContain("state=all&since=2026-11-01T10%3A00%3A00Z");
+  });
+
+  it("tells who opened and who closed a pull request", async () => {
+    mockFetch(
+      on("GET", "/issues/7", { body: { user: actor("pr-author"), closed_by: actor("alice-dev") } }),
+      on("GET", "/issues/8", { body: { user: actor("pr-author") } }),
+    );
+    const gh = new GitHub(() => [REPO]);
+    expect(await gh.pullRequestPeople(REPO, 7)).toEqual({ author: "pr-author", closedBy: "alice-dev" });
+    expect(await gh.pullRequestPeople(REPO, 8)).toEqual({ author: "pr-author", closedBy: null });
+  });
+});

@@ -16,7 +16,7 @@ kChat is built on Mattermost and this service only uses the Mattermost API v4, s
 - **History**: a new thread first receives every past comment and event of the issue, in order and dated, without mentioning anyone. If posting fails midway, it resumes where it stopped. This also applies to old closed issues that get a comment long after the service was installed.
 - **Mentions**: the assignee is mentioned once, in the reply announcing the assignment (even a self-assignment). Being mentioned makes them follow the thread, so later replies reach them through the Threads view without any extra ping. A thread created for an already assigned issue mentions the assignee in its root post. Only users listed in the `team` mapping can be mentioned.
 - **Linked PRs**: `#N`, `fixes #N`, `owner/repo#N` or the issue URL in a PR title or body. A PR can link issues of any configured repository; it then shows as `name#N`. At most 10 references are followed per PR, so a PR listing hundreds of issues cannot flood the channel. PRs linked only from GitHub's "Development" sidebar are picked up by the daily reconcile.
-- **Reconcile**: at startup, then daily (06:00 Europe/Zurich by default), repository by repository. It creates missing threads for open issues, refreshes root posts and finishes interrupted history replays. Events that arrive while the service is down are not replayed into existing threads; GitHub does not redeliver failed webhooks automatically.
+- **Reconcile**: at startup, then on its schedule (daily at 06:00 Europe/Zurich by default), repository by repository. It creates missing threads for open issues, refreshes root posts, finishes interrupted history replays, and **catches up**: what happened since its previous run and was not already posted (by a webhook, a lost delivery, or while the service was down) is posted as dated replies: comments, assignments, closings, reopenings, and PRs linked, merged or closed. Every reply is posted once, whichever source reports it first. The very first run only sets the starting point, so adding the service never floods a channel with old activity.
 - If a root post is deleted in the chat, the thread is recreated on the next event.
 - **Transfers**: a thread whose issue moves away is marked ➡️. If the destination repository is configured too, the issue gets a new thread in that repository's channel.
 
@@ -30,7 +30,7 @@ kChat is built on Mattermost and this service only uses the Mattermost API v4, s
 
 - Docker with the Compose plugin.
 - A public HTTPS endpoint reachable by GitHub, e.g. behind a reverse proxy. An Apache example is provided.
-- Admin rights on the GitHub repositories (or the organization), to create the webhooks.
+- Optional: admin rights on the GitHub repositories (or the organization), to create the webhooks. Without webhooks, see [Running without webhooks](#running-without-webhooks).
 - A kChat/Mattermost bot account added to every target channel.
 
 ## Installation
@@ -102,7 +102,7 @@ The repository's `compose.yml` is the same as above, plus `build: .`.
 2. **Configuration** (`config.yml`): set `kchat.url`, the default `kchat.team`, the `repos` list and the `team` mapping (GitHub login → chat username). See [Configuration](#configuration), and [Finding the kChat values](#finding-the-kchat-values) to read them from a kSuite URL.
 3. **Secrets** (`.env`):
    - `KCHAT_TOKEN`: the bot token.
-   - `GITHUB_WEBHOOK_SECRET`: a random value, e.g. `openssl rand -hex 32`.
+   - `GITHUB_WEBHOOK_SECRET`: a random value, e.g. `openssl rand -hex 32`. Leave it empty to run without webhooks.
    - `GITHUB_TOKEN`: for public repositories, a classic token with no scope or a fine-grained token with read-only access to public repositories. For **private repositories** it is required: a fine-grained token with read-only *Issues*, *Pull requests* and *Metadata* permissions on those repositories (or a classic token with the `repo` scope). Without a token, the GitHub API limit is 60 requests per hour, which the history replay exhausts quickly, and duplicate resolution ("Doublon de #N") is disabled. **Write down its expiry date**: an expired token only shows up in the logs.
 4. **Start**: see [Installation](#installation). The service checks every channel at startup and exits if one cannot be found. On first start, a thread is created for every open issue. It listens on `127.0.0.1:3080`.
 5. **Reverse proxy** (Apache example, as root):
@@ -152,6 +152,19 @@ With `icons: github`, statuses show GitHub's own octicons (issue opened, closed,
 
 Switching icons edits every root post at the next startup, closed issues included (an edit, no notification). Replies already posted keep their old icons.
 
+### Running without webhooks
+
+Webhooks are optional. Leave `GITHUB_WEBHOOK_SECRET` empty: `/webhook` is then disabled and the reconcile alone reports activity, with a delay of up to its period. Run it more often, for instance hourly:
+
+```yaml
+reconcile:
+  cron: "0 * * * *"
+```
+
+Each run costs about two GitHub requests per repository, plus a few per issue updated since the previous run, plus one per open issue about once a day (to find PRs linked from GitHub's sidebar). Set `GITHUB_TOKEN`: without it, GitHub allows 60 requests per hour.
+
+Webhooks and the reconcile also work together: webhooks post right away, and the reconcile posts what they missed.
+
 ### Finding the kChat values
 
 kChat is opened through the kSuite, whose URLs do not show the API host. Take the URL of the target channel in the kSuite:
@@ -180,7 +193,7 @@ A repository posts into exactly one channel. Data written before multi-repositor
 - Update: `docker compose pull && docker compose up -d` (prebuilt image), or `git pull && docker compose up -d --build` (from source).
 - Health check: `curl https://<your-host>/health`.
 - State (issue → thread mapping, linked PRs, history progress) lives in the `data` Docker volume.
-- **Adding a repository**: add it to `repos`, add the bot to its channel, create its webhook, then `docker compose restart`. Its open issues get threads right away.
+- **Adding a repository**: add it to `repos`, add the bot to its channel, create its webhook (if webhooks are used), then `docker compose restart`. Its open issues get threads right away, each with its whole history: adding many repositories at once posts a lot into their channels.
 - **Moving a repository to another channel**: change its `channel` and restart. Its threads are recreated in the new channel, with their history: open issues right away, others on their next event. Old threads stay where they are; other repositories are not affected.
 - **Renaming a repository** (or moving it to another owner) on GitHub: nothing to do right away. The service recognises it by GitHub's id, at startup or on its next webhook, and its threads follow the new name; a warning asks to update its name in `config.yml` (until then, each startup follows GitHub's redirect).
 - **Removing a repository**: remove it from `repos` and delete its webhook. Its threads stay in the channel and are no longer updated.

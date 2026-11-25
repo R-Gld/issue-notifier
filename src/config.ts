@@ -83,7 +83,8 @@ const fileSchema = z.object({
 
 const envSchema = z.object({
   KCHAT_TOKEN: z.string().min(1),
-  GITHUB_WEBHOOK_SECRET: z.string().min(1),
+  /** Without it, webhooks are off and the reconcile alone reports activity. */
+  GITHUB_WEBHOOK_SECRET: z.string().optional(),
   GITHUB_TOKEN: z.string().optional(),
   CONFIG_PATH: z.string().default("config.yml"),
   DB_PATH: z.string().default("data/issue-notifier.db"),
@@ -108,7 +109,7 @@ export interface Config {
   repos: RepoConfig[];
   kchat: { url: string; token: string };
   icons: IconSetName;
-  github: { token?: string; webhookSecret: string };
+  github: { token?: string; webhookSecret?: string };
   /** GitHub login (lowercased) → kChat username. */
   team: Map<string, string>;
   excerptLength: number;
@@ -135,7 +136,7 @@ export function buildConfig(file: unknown, env: NodeJS.ProcessEnv): Config {
     })),
     kchat: { url: f.kchat.url.replace(/\/+$/, ""), token: e.KCHAT_TOKEN },
     icons: f.icons,
-    github: { token: e.GITHUB_TOKEN || undefined, webhookSecret: e.GITHUB_WEBHOOK_SECRET },
+    github: { token: e.GITHUB_TOKEN || undefined, webhookSecret: e.GITHUB_WEBHOOK_SECRET || undefined },
     team: new Map(Object.entries(f.team).map(([gh, kchat]) => [gh.toLowerCase(), kchat.replace(/^@/, "")])),
     excerptLength: f.comments.excerptLength,
     reconcile: f.reconcile,

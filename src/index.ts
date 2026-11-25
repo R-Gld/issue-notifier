@@ -40,6 +40,7 @@ const server = createApp({
   store,
 });
 server.listen(config.port, config.host, () => log.info("listening", { host: config.host, port: config.port }));
+if (!config.github.webhookSecret) log.info("webhooks off (no GITHUB_WEBHOOK_SECRET): the reconcile alone reports activity", { cron: config.reconcile.cron });
 
 void notifier.enqueue("startup reconcile", () => notifier.reconcile());
 const cron = new Cron(config.reconcile.cron, { timezone: config.reconcile.timezone }, () => {

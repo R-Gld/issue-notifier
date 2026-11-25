@@ -137,3 +137,19 @@ describe("webhook endpoint", () => {
     expect((await deliver(opened, { delivery: "d3" })).status).toBe(200);
   });
 });
+
+describe("without a webhook secret", () => {
+  it("only serves the health check", async () => {
+    const server = createApp({ notifier, store });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      expect((await fetch(`${url}/health`)).status).toBe(200);
+      const raw = JSON.stringify(opened);
+      const res = await fetch(`${url}/webhook`, { method: "POST", body: raw, headers: { "x-hub-signature-256": await sign("any", raw) } });
+      expect(res.status).toBe(404);
+    } finally {
+      server.close();
+    }
+  });
+});

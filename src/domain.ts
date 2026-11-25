@@ -84,3 +84,32 @@ export function toSnapshot(issue: GhIssue): IssueSnapshot {
 export function isBot(user: { login: string; type?: string } | null | undefined): boolean {
   return !!user && (user.type === "Bot" || user.login.endsWith("[bot]"));
 }
+
+/**
+ * Identifies an event across its sources (webhook, history, catch-up), so it is posted once.
+ * Times are compared separately, with some slack: a webhook and the timeline may disagree by a few seconds.
+ */
+export function fingerprint(e: HistoryEvent): string {
+  const actor = e.actor.toLowerCase();
+  switch (e.kind) {
+    case "commented":
+      return `commented|${e.url}`;
+    case "assigned":
+    case "unassigned":
+      return `${e.kind}|${actor}|${e.assignee.toLowerCase()}`;
+    case "labeled":
+    case "unlabeled":
+      return `${e.kind}|${actor}|${e.label.toLowerCase()}`;
+    case "renamed":
+      return `renamed|${actor}|${e.to}`;
+    case "typed":
+      return `typed|${actor}|${e.type?.toLowerCase() ?? ""}`;
+    case "milestoned":
+      return `milestoned|${actor}|${e.milestone ?? ""}`;
+    case "closed":
+    case "reopened":
+      return `${e.kind}|${actor}`;
+    case "pr_linked":
+      return `pr_linked|${e.pr.repo.toLowerCase()}#${e.pr.number}`;
+  }
+}
